@@ -1,20 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
-export default function LoginPage() {
+function LoginInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const plano = searchParams.get("plano");
 
   const planoTexto = useMemo(() => {
-    if (plano === "1h") return "1 hora";
-    if (plano === "2h") return "2 horas";
-    if (plano === "day") return "Dia todo (24h)";
+    if (plano === "1h") return "1 hora — R$ 14,90";
+    if (plano === "2h") return "2 horas — R$ 19,90";
+    if (plano === "day") return "Dia todo (24h) — R$ 29,90";
     return null;
   }, [plano]);
 
@@ -40,13 +40,13 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setErro("Erro ao enviar: " + error.message);
+      setErro(`Erro ao enviar: ${error.message}`);
       return;
     }
 
     setEnviado(true);
-    setAguarde(60);
 
+    setAguarde(60);
     const timer = window.setInterval(() => {
       setAguarde((s) => {
         if (s <= 1) {
@@ -62,7 +62,7 @@ export default function LoginPage() {
     setErro(null);
 
     if (codigo.trim().length < 6) {
-      alert("Digite o código enviado por e-mail.");
+      alert("Digite o código que chegou no seu e-mail.");
       return;
     }
 
@@ -92,22 +92,18 @@ export default function LoginPage() {
       {planoTexto ? (
         <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
           <div style={{ fontSize: 13, opacity: 0.75 }}>Plano escolhido</div>
-          <div style={{ fontSize: 18, fontWeight: 600 }}>{planoTexto}</div>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>{planoTexto}</div>
         </div>
       ) : (
-        <div style={{ fontSize: 13, opacity: 0.75 }}>
-          (Você ainda não escolheu um plano.)
-        </div>
+        <div style={{ fontSize: 13, opacity: 0.75 }}>(Você ainda não escolheu um plano.)</div>
       )}
 
       <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
           Receber código por e-mail
         </div>
 
-        <label style={{ display: "block", fontSize: 13, opacity: 0.75 }}>
-          Seu e-mail
-        </label>
+        <label style={{ display: "block", fontSize: 13, opacity: 0.75 }}>Seu e-mail</label>
 
         <input
           value={email}
@@ -139,9 +135,7 @@ export default function LoginPage() {
             cursor: "pointer",
           }}
         >
-          {aguarde > 0
-            ? `Aguarde ${aguarde}s para reenviar`
-            : "Enviar código por e-mail"}
+          {aguarde > 0 ? `Aguarde ${aguarde}s para reenviar` : "Enviar código por e-mail"}
         </button>
 
         {erro && (
@@ -160,7 +154,7 @@ export default function LoginPage() {
               lineHeight: 1.35,
             }}
           >
-            <div style={{ fontWeight: 600 }}>Pronto.</div>
+            <div style={{ fontWeight: 700 }}>Pronto.</div>
 
             <div style={{ fontSize: 13, opacity: 0.85, marginTop: 6 }}>
               Enviamos um código para <b>{email}</b>.
@@ -170,30 +164,26 @@ export default function LoginPage() {
 
             <div style={{ marginTop: 14 }}>
               <label style={{ display: "block", fontSize: 13, opacity: 0.75 }}>
-                Digite o código enviado por e-mail.
+                Digite o código (normalmente 8 dígitos)
               </label>
 
               <input
-  value={codigo}
-  onChange={(e) =>
-    setCodigo(e.target.value.replace(/\D/g, "").slice(0, 8))
-  }
-  placeholder="12345678"
-  inputMode="numeric"
-  autoComplete="one-time-code"
-  maxLength={8}
-  style={{
-    marginTop: 6,
-    width: "100%",
-    height: 48,
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.2)",
-    padding: "0 12px",
-    fontSize: 16,
-    letterSpacing: 2.5,
-    textAlign: "center",
-  }}
-/>
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                placeholder="12345678"
+                inputMode="numeric"
+                style={{
+                  marginTop: 6,
+                  width: "100%",
+                  height: 48,
+                  borderRadius: 12,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                  padding: "0 12px",
+                  fontSize: 16,
+                  letterSpacing: 3,
+                  textAlign: "center",
+                }}
+              />
 
               <button
                 type="button"
@@ -235,6 +225,14 @@ export default function LoginPage() {
         Voltar para a landing
       </Link>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main style={{ padding: 16 }}>Carregando login…</main>}>
+      <LoginInner />
+    </Suspense>
   );
 }
 
