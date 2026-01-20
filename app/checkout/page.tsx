@@ -2,7 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 function getSupabaseClient() {
@@ -12,11 +12,10 @@ function getSupabaseClient() {
 }
 
 function CheckoutInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const plano = searchParams.get("plano"); // "1h" | "2h" | "day"
 
-  const [isCreating, setIsCreating] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const planoTexto = useMemo(() => {
@@ -26,128 +25,99 @@ function CheckoutInner() {
     return "(nenhum plano selecionado)";
   }, [plano]);
 
-  function getDurationMinutes() {
-    if (plano === "1h") return 60;
-    if (plano === "2h") return 120;
-    if (plano === "day") return 24 * 60;
-    return 0;
-  }
-
-  async function handleSimulatedContinue() {
+  async function handlePay() {
     setError(null);
 
-    const minutes = getDurationMinutes();
-    if (!minutes) {
+    if (!plano || !["1h", "2h", "day"].includes(plano)) {
       setError("Selecione um plano primeiro.");
       return;
     }
 
     try {
-      setIsCreating(true);
+      setIsPaying(true);
 
       const supabase = getSupabaseClient();
 
-      // 1) Descobre o usuário logado
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr) {
-        setError("Erro ao identificar usuário. Tente fazer login novamente.");
+      // 1) Pega a sessão atual (login invisível do usuário)
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
+
+      if (sessionErr) {
+        setError("Erro ao identificar seu login. Tente novamente.");
         return;
       }
 
-      const user = userData?.user;
-      if (!user?.id) {
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
         setError("Você não está logado. Volte e faça login novamente.");
         return;
       }
 
-      // 2) expires_at no futuro (agora + duração)
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + minutes * 60 * 1000);
-
-      // 3) Insere na tabela passes (somente colunas que sabemos que existem)
-      const { error: insertErr } = await supabase.from("passes").insert({
-        user_id: user.id,
-        expires_at: expiresAt.toISOString(),
+      // 2) Chama o servidor para criar o checkout do Mercado Pago
+      const res = await fetch("/api/mercadopago/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ plan: plano }),
       });
 
-      if (insertErr) {
-        setError(
-          "Não consegui criar o passe no Supabase. " +
-            "Isso geralmente acontece por regra de segurança (RLS) ou nomes de coluna diferentes. " +
-            "Erro: " +
-            insertErr.message
-        );
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+      const msg =
+    (json?.error ? String(json.error) : "Erro ao criar checkout.") +
+    (json?.details ? "\n\nDETAILS:\n" + JSON.stringify(json.details, null, 2) : "");
+  setError(msg);
         return;
       }
 
-      // 4) Entra no Journey
-      router.push("/journey");
+      if (!json?.checkoutUrl) {
+        setError("Não recebi a URL do Mercado Pago.");
+        return;
+      }
+
+      // 3) Abre o Mercado Pago
+      window.location.href = json.checkoutUrl;
     } catch (e: any) {
-      setError("Erro inesperado ao simular: " + String(e?.message || e));
+      setError("Erro inesperado: " + String(e?.message || e));
     } finally {
-      setIsCreating(false);
+      setIsPaying(false);
     }
   }
 
   return (
     <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-      <h1 style={{ margin: 0 }}>Checkout</h1>
+      <h1>Checkout</h1>
 
-      <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-        <div style={{ fontSize: 13, opacity: 0.75 }}>Plano</div>
+      <div style={{ border: "1px solid rgba(0,0,0,0.15)", borderRadius: 16, padding: 16 }}>
+        <div style={{ fontSize: 13, opacity: 0.7 }}>Plano selecionado</div>
         <div style={{ fontSize: 18, fontWeight: 700 }}>{planoTexto}</div>
       </div>
 
-      <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-        <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.35 }}>
-          Nesta etapa, o pagamento ainda é “simulado”.
-          <br />
-          Agora o botão abaixo cria um passe de teste no Supabase e libera o Journey.
-          <br />
-          Próximo passo: Mercado Pago (Pix + cartão) em checkout único.
-        </div>
-      </div>
-
       <button
-        onClick={handleSimulatedContinue}
-        disabled={isCreating}
+        onClick={handlePay}
+        disabled={isPaying}
         style={{
           height: 52,
           borderRadius: 16,
           border: "1px solid rgba(0,0,0,0.15)",
-          fontSize: 16,
           background: "white",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "black",
-          cursor: isCreating ? "not-allowed" : "pointer",
+          fontSize: 16,
+          cursor: isPaying ? "not-allowed" : "pointer",
         }}
       >
-        {isCreating ? "Criando passe…" : "Continuar (simulado)"}
+        {isPaying ? "Abrindo Mercado Pago…" : "Pagar (Pix ou Cartão)"}
       </button>
 
       {error && (
-        <div style={{ color: "crimson", lineHeight: 1.35 }}>
+        <div style={{ color: "crimson" }}>
           <b>Erro:</b> {error}
         </div>
       )}
 
-      <Link
-        href="/"
-        style={{
-          height: 52,
-          borderRadius: 16,
-          border: "1px solid rgba(0,0,0,0.15)",
-          fontSize: 16,
-          background: "white",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textDecoration: "none",
-          color: "black",
-        }}
-      >
+      <Link href="/" style={{ textDecoration: "none", textAlign: "center" }}>
         Voltar para a landing
       </Link>
     </main>
