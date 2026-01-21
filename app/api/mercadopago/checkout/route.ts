@@ -11,12 +11,12 @@ type Plan = "1h" | "2h" | "day";
 
 function planToItem(plan: Plan) {
   if (plan === "1h") {
-    return { title: "Jornada — Passe 1 hora", price: 14.9, seconds: 60 * 60 };
+    return { title: "Jornada — Passe 1 hora (teste)", price: 0.01, seconds: 60 * 60 };
   }
   if (plan === "2h") {
-    return { title: "Jornada — Passe 2 horas", price: 19.9, seconds: 2 * 60 * 60 };
+    return { title: "Jornada — Passe 2 horas (teste)", price: 0.01, seconds: 2 * 60 * 60 };
   }
-  return { title: "Jornada — Passe 24 horas", price: 29.9, seconds: 24 * 60 * 60 };
+  return { title: "Jornada — Passe 24 horas (teste)", price: 0.01, seconds: 24 * 60 * 60 };
 }
 
 export async function POST(req: Request) {
