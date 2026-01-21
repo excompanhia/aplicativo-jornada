@@ -134,6 +134,18 @@ export async function POST(req: Request) {
       payment_provider: "mercadopago",
       payment_id: mpPaymentId,
     };
+    
+// 🔒 Regra: apenas 1 passe ativo por usuário
+// Antes de criar o novo passe, expira qualquer passe ativo anterior
+const { error: expireErr } = await supabase
+  .from("passes")
+  .update({ status: "expired" })
+  .eq("user_id", passInsert.user_id)
+  .eq("status", "active");
+
+if (expireErr) {
+  console.error("Erro ao expirar passes antigos:", expireErr);
+}
 
     const { data: passRow, error: passErr } = await supabase
       .from("passes")
