@@ -100,23 +100,38 @@ export async function POST(req: Request) {
 
     // 7) Cria a preferência no Mercado Pago
     const preferencePayload = {
-      items: [
-        {
-          title: item.title,
-          quantity: 1,
-          unit_price: item.price,
-          currency_id: "BRL",
-        },
-      ],
-      notification_url: `${siteUrl}/api/webhook/mercadopago`,
-      metadata: {
-        user_id: user.id,
-        user_email: user.email,
-        plan,
-        seconds: item.seconds,
-      },
-      external_reference: `jornada:${user.id}:${plan}:${Date.now()}`,
-    };
+  items: [
+    {
+      title: item.title,
+      quantity: 1,
+      unit_price: item.price,
+      currency_id: "BRL",
+    },
+  ],
+
+  // 1) Webhook (server-to-server)
+  notification_url: `${siteUrl}/api/webhook/mercadopago`,
+
+  // 2) Para onde o Mercado Pago manda o usuário voltar
+  back_urls: {
+    success: `${siteUrl}/payment/success`,
+    pending: `${siteUrl}/payment/pending`,
+    failure: `${siteUrl}/payment/failure`,
+  },
+
+  // 3) Tenta redirecionar automaticamente quando for aprovado (cartão costuma voltar)
+  auto_return: "approved",
+
+  // 4) Dados que a gente usa no webhook para criar o passe
+  metadata: {
+    user_id: user.id,
+    user_email: user.email,
+    plan,
+    seconds: item.seconds,
+  },
+
+  external_reference: `jornada:${user.id}:${plan}:${Date.now()}`,
+};
 
     const mpRes = await fetch(
       "https://api.mercadopago.com/checkout/preferences",
@@ -139,17 +154,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const isTest = mpAccessToken.startsWith("TEST-");
-const checkoutUrl =
-  (isTest ? mpJson?.sandbox_init_point : mpJson?.init_point) ??
-  mpJson?.init_point;
+    const checkoutUrl = mpJson?.sandbox_init_point ?? mpJson?.init_point;
 
 return NextResponse.json({
   ok: true,
   checkoutUrl,
   preferenceId: mpJson?.id,
-  isTest,
+  hasSandboxUrl: Boolean(mpJson?.sandbox_init_point),
 });
+
   } catch (err: any) {
     return NextResponse.json(
       { error: "Erro inesperado.", details: String(err?.message || err) },
