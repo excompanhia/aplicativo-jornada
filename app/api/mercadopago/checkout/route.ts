@@ -140,16 +140,16 @@ export async function POST(req: Request) {
     }
 
     const isTest = mpAccessToken.startsWith("TEST-");
-    const checkoutUrl =
-      (isTest ? mpJson?.sandbox_init_point : mpJson?.init_point) ??
-      mpJson?.init_point;
+const checkoutUrl =
+  (isTest ? mpJson?.sandbox_init_point : mpJson?.init_point) ??
+  mpJson?.init_point;
 
-    return NextResponse.json({
-      ok: true,
-      checkoutUrl,
-      preferenceId: mpJson?.id,
-      isTest,
-    });
+return NextResponse.json({
+  ok: true,
+  checkoutUrl,
+  preferenceId: mpJson?.id,
+  isTest,
+});
   } catch (err: any) {
     return NextResponse.json(
       { error: "Erro inesperado.", details: String(err?.message || err) },
