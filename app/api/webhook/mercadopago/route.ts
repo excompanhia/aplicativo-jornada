@@ -35,30 +35,52 @@ export async function POST(req: Request) {
 
     // Mercado Pago pode mandar id em lugares diferentes
     const url = new URL(req.url);
-    const idFromQuery = url.searchParams.get("data.id") || url.searchParams.get("id");
-    const paymentId = body?.data?.id || body?.id || idFromQuery;
+    const idFromQuery =
+      url.searchParams.get("data.id") ||
+      url.searchParams.get("id") ||
+      url.searchParams.get("payment_id");
 
-    // Sem paymentId: não processa, mas responde 200
+    // ✅ Captura mais formatos possíveis
+    const paymentId =
+      body?.data?.id ||
+      body?.data?.object?.id ||
+      body?.id ||
+      body?.payment_id ||
+      idFromQuery;
+
+    // ✅ Sem paymentId: não processa, mas responde 200 (IMPORTANTE!)
     if (!paymentId) {
-      return NextResponse.json({ ok: true, ignored: true, reason: "sem paymentId" });
+      return NextResponse.json({
+        ok: true,
+        ignored: true,
+        reason: "Evento sem paymentId (ignorado)",
+      });
     }
 
     // Busca o pagamento real no MP (fonte da verdade)
-    const payRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${mpAccessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const payRes = await fetch(
+      `https://api.mercadopago.com/v1/payments/${paymentId}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${mpAccessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
     const payment = await payRes.json().catch(() => null);
 
+    // ✅ Se não achou payment, também NÃO deve virar 400 "fatal" (só ignora)
+    // Isso pode acontecer por timing (MP avisa antes do payment ficar disponível).
     if (!payRes.ok || !payment?.id) {
-      return NextResponse.json(
-        { ok: false, error: "Falha ao buscar payment no Mercado Pago", details: payment },
-        { status: 400 }
-      );
+      return NextResponse.json({
+        ok: true,
+        ignored: true,
+        reason: "Payment ainda não disponível / não encontrado",
+        mp_status: payRes.status,
+        details: payment,
+      });
     }
 
     const status: string = payment.status; // approved | pending | rejected | cancelled...
@@ -96,25 +118,41 @@ export async function POST(req: Request) {
 
     if (existErr) {
       return NextResponse.json(
-        { ok: false, error: "Erro ao checar passe existente", details: existErr.message },
+        {
+          ok: false,
+          error: "Erro ao checar passe existente",
+          details: existErr.message,
+        },
         { status: 500 }
       );
     }
 
     if (existing?.id) {
-      return NextResponse.json({ ok: true, status, alreadyProcessed: true, pass_id: existing.id });
+      return NextResponse.json({
+        ok: true,
+        status,
+        alreadyProcessed: true,
+        pass_id: existing.id,
+      });
     }
 
-    // 2) Se não approved, não cria passe (mas retorna o status)
+    // 2) Se não approved, não cria passe (mas retorna 200 com status)
     if (status !== "approved") {
       return NextResponse.json({ ok: true, status, createdPass: false });
     }
 
     // 3) approved → precisa do userId + seconds
     if (!userId || !seconds) {
+      // ✅ Não dá 400. Só reporta.
       return NextResponse.json(
-        { ok: false, error: "approved mas faltam dados (user_id/seconds) na metadata", status },
-        { status: 500 }
+        {
+          ok: true,
+          status,
+          createdPass: false,
+          ignored: true,
+          reason: "approved mas faltam dados (user_id/seconds) na metadata",
+        },
+        { status: 200 }
       );
     }
 
@@ -134,19 +172,20 @@ export async function POST(req: Request) {
       payment_provider: "mercadopago",
       payment_id: mpPaymentId,
     };
-    
-// 🔒 Regra: apenas 1 passe ativo por usuário
-// Antes de criar o novo passe, expira qualquer passe ativo anterior
-const { error: expireErr } = await supabase
-  .from("passes")
-  .update({ status: "expired" })
-  .eq("user_id", passInsert.user_id)
-  .eq("status", "active");
 
-if (expireErr) {
-  console.error("Erro ao expirar passes antigos:", expireErr);
-}
+    // 🔒 Regra: apenas 1 passe ativo por usuário
+    // Antes de criar o novo passe, expira qualquer passe ativo anterior
+    const { error: expireErr } = await supabase
+      .from("passes")
+      .update({ status: "expired" })
+      .eq("user_id", passInsert.user_id)
+      .eq("status", "active");
 
+    if (expireErr) {
+      console.error("Erro ao expirar passes antigos:", expireErr);
+    }
+
+    // 4) Cria o passe novo
     const { data: passRow, error: passErr } = await supabase
       .from("passes")
       .insert(passInsert)
@@ -169,7 +208,11 @@ if (expireErr) {
     });
   } catch (err: any) {
     return NextResponse.json(
-      { ok: false, error: "Erro inesperado no webhook", details: String(err?.message || err) },
+      {
+        ok: false,
+        error: "Erro inesperado no webhook",
+        details: String(err?.message || err),
+      },
       { status: 500 }
     );
   }
