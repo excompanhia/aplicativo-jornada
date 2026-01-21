@@ -79,7 +79,8 @@ function CheckoutInner() {
       }
 
       // 3) Abre o Mercado Pago
-      window.location.href = json.checkoutUrl;
+      window.open(json.checkoutUrl, "_blank", "noopener,noreferrer");
+window.location.href = "/payment/pending";
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
     } finally {
