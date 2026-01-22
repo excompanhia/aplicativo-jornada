@@ -9,14 +9,44 @@ import { NextResponse } from "next/server";
 
 type Plan = "1h" | "2h" | "day";
 
+// Detecta ambiente na Vercel de forma confiável
+function getVercelEnv(): "production" | "preview" | "development" | "unknown" {
+  const v = (process.env.VERCEL_ENV || "").toLowerCase();
+  if (v === "production" || v === "preview" || v === "development") return v;
+  return "unknown";
+}
+
+function isProductionEnv() {
+  // Em localhost, VERCEL_ENV normalmente não existe → cai em "unknown"
+  // Então "production" é só quando VERCEL_ENV === "production"
+  return getVercelEnv() === "production";
+}
+
 function planToItem(plan: Plan) {
+  const prod = isProductionEnv();
+
+  // Observação: você comentou que “agora está 1 real”.
+  // Mantive 1 real em ambos por enquanto, mas removi "(teste)" em produção.
+  // Depois você pode voltar os preços reais quando quiser.
   if (plan === "1h") {
-    return { title: "Jornada — Passe 1 hora (teste)", price: 1.0, seconds: 60 * 60 };
+    return {
+      title: prod ? "Jornada — Passe 1 hora" : "Jornada — Passe 1 hora (teste)",
+      price: 1.0,
+      seconds: 60 * 60,
+    };
   }
   if (plan === "2h") {
-    return { title: "Jornada — Passe 2 horas (teste)", price: 1.0, seconds: 2 * 60 * 60 };
+    return {
+      title: prod ? "Jornada — Passe 2 horas" : "Jornada — Passe 2 horas (teste)",
+      price: 1.0,
+      seconds: 2 * 60 * 60,
+    };
   }
-  return { title: "Jornada — Passe 24 horas (teste)", price: 1.0, seconds: 24 * 60 * 60 };
+  return {
+    title: prod ? "Jornada — Passe 24 horas" : "Jornada — Passe 24 horas (teste)",
+    price: 1.0,
+    seconds: 24 * 60 * 60,
+  };
 }
 
 export async function POST(req: Request) {
@@ -100,50 +130,48 @@ export async function POST(req: Request) {
 
     // 7) Cria a preferência no Mercado Pago
     const preferencePayload = {
-  items: [
-    {
-      title: item.title,
-      quantity: 1,
-      unit_price: item.price,
-      currency_id: "BRL",
-    },
-  ],
-
-  // 1) Webhook (server-to-server)
-  notification_url: `${siteUrl}/api/webhook/mercadopago`,
-
-  // 2) Para onde o Mercado Pago manda o usuário voltar
-  back_urls: {
-    success: `${siteUrl}/payment/success`,
-    pending: `${siteUrl}/payment/pending`,
-    failure: `${siteUrl}/payment/failure`,
-  },
-
-  // 3) Tenta redirecionar automaticamente quando for aprovado (cartão costuma voltar)
-  auto_return: "approved",
-
-  // 4) Dados que a gente usa no webhook para criar o passe
-  metadata: {
-    user_id: user.id,
-    user_email: user.email,
-    plan,
-    seconds: item.seconds,
-  },
-
-  external_reference: `jornada:${user.id}:${plan}:${Date.now()}`,
-};
-
-    const mpRes = await fetch(
-      "https://api.mercadopago.com/checkout/preferences",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${mpAccessToken}`,
-          "Content-Type": "application/json",
+      items: [
+        {
+          title: item.title,
+          quantity: 1,
+          unit_price: item.price,
+          currency_id: "BRL",
         },
-        body: JSON.stringify(preferencePayload),
-      }
-    );
+      ],
+
+      // 1) Webhook (server-to-server)
+      notification_url: `${siteUrl}/api/webhook/mercadopago`,
+
+      // 2) Para onde o Mercado Pago manda o usuário voltar
+      back_urls: {
+        success: `${siteUrl}/payment/success`,
+        pending: `${siteUrl}/payment/pending`,
+        failure: `${siteUrl}/payment/failure`,
+      },
+
+      // 3) Tenta redirecionar automaticamente quando for aprovado (cartão costuma voltar)
+      auto_return: "approved",
+
+      // 4) Dados que a gente usa no webhook para criar o passe
+      metadata: {
+        user_id: user.id,
+        user_email: user.email,
+        plan,
+        seconds: item.seconds,
+        vercel_env: getVercelEnv(),
+      },
+
+      external_reference: `jornada:${user.id}:${plan}:${Date.now()}`,
+    };
+
+    const mpRes = await fetch("https://api.mercadopago.com/checkout/preferences", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${mpAccessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(preferencePayload),
+    });
 
     const mpJson = await mpRes.json().catch(() => null);
 
@@ -154,15 +182,29 @@ export async function POST(req: Request) {
       );
     }
 
-    const checkoutUrl = mpJson?.sandbox_init_point ?? mpJson?.init_point;
+    // ✅ REGRA CORRETA:
+    // - Production -> init_point (real)
+    // - Preview/Development -> sandbox_init_point (se existir), senão init_point
+    const prod = isProductionEnv();
+    const checkoutUrl = prod
+      ? (mpJson?.init_point as string | undefined)
+      : (mpJson?.sandbox_init_point as string | undefined) ?? (mpJson?.init_point as string | undefined);
 
-return NextResponse.json({
-  ok: true,
-  checkoutUrl,
-  preferenceId: mpJson?.id,
-  hasSandboxUrl: Boolean(mpJson?.sandbox_init_point),
-});
+    if (!checkoutUrl) {
+      return NextResponse.json(
+        { error: "Mercado Pago não retornou uma URL de checkout.", details: mpJson },
+        { status: 400 }
+      );
+    }
 
+    return NextResponse.json({
+      ok: true,
+      checkoutUrl,
+      preferenceId: mpJson?.id,
+      vercelEnv: getVercelEnv(),
+      chosen: prod ? "init_point" : "sandbox_init_point_or_init_point",
+      hasSandboxUrl: Boolean(mpJson?.sandbox_init_point),
+    });
   } catch (err: any) {
     return NextResponse.json(
       { error: "Erro inesperado.", details: String(err?.message || err) },
