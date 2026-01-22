@@ -1,3 +1,5 @@
+import ServiceWorkerRegister from "./components/ServiceWorkerRegister";
+
 export default function RootLayout({
   children,
 }: {
@@ -23,6 +25,8 @@ export default function RootLayout({
         >
           {children}
         </div>
+
+        <ServiceWorkerRegister />
       </body>
     </html>
   );
