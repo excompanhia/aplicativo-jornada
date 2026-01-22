@@ -40,7 +40,6 @@ export async function POST(req: Request) {
       url.searchParams.get("id") ||
       url.searchParams.get("payment_id");
 
-    // ✅ Captura mais formatos possíveis
     const paymentId =
       body?.data?.id ||
       body?.data?.object?.id ||
@@ -48,7 +47,7 @@ export async function POST(req: Request) {
       body?.payment_id ||
       idFromQuery;
 
-    // ✅ Sem paymentId: não processa, mas responde 200 (IMPORTANTE!)
+    // Sem paymentId: ignora, mas responde 200
     if (!paymentId) {
       return NextResponse.json({
         ok: true,
@@ -71,8 +70,7 @@ export async function POST(req: Request) {
 
     const payment = await payRes.json().catch(() => null);
 
-    // ✅ Se não achou payment, também NÃO deve virar 400 "fatal" (só ignora)
-    // Isso pode acontecer por timing (MP avisa antes do payment ficar disponível).
+    // Se não achou payment, não falha “fatal” (timing do MP)
     if (!payRes.ok || !payment?.id) {
       return NextResponse.json({
         ok: true,
@@ -89,8 +87,9 @@ export async function POST(req: Request) {
     const metadata = payment.metadata || {};
     const externalReference: string | undefined = payment.external_reference;
 
-    // Dados que você colocou na preference (checkout/route.ts)
+    // Dados da preference
     let userId: string | undefined = metadata.user_id;
+
     let seconds: number | undefined =
       typeof metadata.seconds === "number" ? metadata.seconds : undefined;
 
@@ -99,7 +98,7 @@ export async function POST(req: Request) {
       if (Number.isFinite(n)) seconds = n;
     }
 
-    // Fallback pelo external_reference: jornada:${userId}:${plan}:${Date.now()}
+    // Fallback: jornada:${userId}:${plan}:${Date.now()}
     if (!userId && typeof externalReference === "string") {
       const parts = externalReference.split(":");
       if (parts.length >= 2 && parts[0] === "jornada") {
@@ -112,7 +111,7 @@ export async function POST(req: Request) {
     // 1) Idempotência: se já existe passe com esse payment_id, não cria de novo
     const { data: existing, error: existErr } = await supabase
       .from("passes")
-      .select("id")
+      .select("id, status, expires_at")
       .eq("payment_id", mpPaymentId)
       .maybeSingle();
 
@@ -133,6 +132,8 @@ export async function POST(req: Request) {
         status,
         alreadyProcessed: true,
         pass_id: existing.id,
+        pass_status: existing.status,
+        expires_at: existing.expires_at,
       });
     }
 
@@ -143,7 +144,6 @@ export async function POST(req: Request) {
 
     // 3) approved → precisa do userId + seconds
     if (!userId || !seconds) {
-      // ✅ Não dá 400. Só reporta.
       return NextResponse.json(
         {
           ok: true,
@@ -163,6 +163,12 @@ export async function POST(req: Request) {
     const expiresAt = addSeconds(purchasedAt, seconds);
     const durationMinutes = Math.round(seconds / 60);
 
+    // ✅ Importante:
+    // Mesmo que a gente insira "active", alguns setups no banco podem sobrescrever no INSERT.
+    // Por isso vamos:
+    // 1) inserir
+    // 2) forçar UPDATE do novo id para status="active"
+    // 3) expirar os outros (excluindo o novo id)
     const passInsert = {
       user_id: userId,
       status: "active",
@@ -173,38 +179,59 @@ export async function POST(req: Request) {
       payment_id: mpPaymentId,
     };
 
-    // 🔒 Regra: apenas 1 passe ativo por usuário
-    // Antes de criar o novo passe, expira qualquer passe ativo anterior
+    // 4) Cria o passe novo
+    const { data: inserted, error: insertErr } = await supabase
+      .from("passes")
+      .insert(passInsert)
+      .select("id")
+      .single();
+
+    if (insertErr || !inserted?.id) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Falha ao criar passe",
+          details: insertErr?.message || "insert sem id",
+        },
+        { status: 500 }
+      );
+    }
+
+    const newPassId = inserted.id as string;
+
+    // ✅ 5) Força o status "active" no passe recém-criado (ganha de defaults/triggers de INSERT)
+    const { data: fixed, error: fixErr } = await supabase
+      .from("passes")
+      .update({ status: "active" })
+      .eq("id", newPassId)
+      .select("id, status, expires_at")
+      .single();
+
+    if (fixErr) {
+      // Não derruba o webhook; mas reporta para debug
+      console.error("Erro ao forçar status active no novo passe:", fixErr);
+    }
+
+    // 🔒 6) Regra: apenas 1 passe ativo por usuário
+    // Expira qualquer outro passe ativo anterior (exclui o passe novo)
     const { error: expireErr } = await supabase
       .from("passes")
       .update({ status: "expired" })
-      .eq("user_id", passInsert.user_id)
-      .eq("status", "active");
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .neq("id", newPassId);
 
     if (expireErr) {
       console.error("Erro ao expirar passes antigos:", expireErr);
-    }
-
-    // 4) Cria o passe novo
-    const { data: passRow, error: passErr } = await supabase
-      .from("passes")
-      .insert(passInsert)
-      .select("id, expires_at")
-      .single();
-
-    if (passErr) {
-      return NextResponse.json(
-        { ok: false, error: "Falha ao criar passe", details: passErr.message },
-        { status: 500 }
-      );
     }
 
     return NextResponse.json({
       ok: true,
       status,
       createdPass: true,
-      pass_id: passRow?.id,
-      expires_at: passRow?.expires_at,
+      pass_id: newPassId,
+      pass_status: fixed?.status || "active",
+      expires_at: fixed?.expires_at || expiresAt,
     });
   } catch (err: any) {
     return NextResponse.json(
