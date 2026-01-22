@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
  * Endpoint do servidor para criar o checkout do Mercado Pago
  * Recebe:
  *  - plan: "1h" | "2h" | "day"
+ *  - renewal?: boolean  (true = renovação com desconto, só permitido faltando <= 5 min)
  *  - Authorization: Bearer <access_token do Supabase>
  */
 
@@ -22,12 +23,16 @@ function isProductionEnv() {
   return getVercelEnv() === "production";
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function planToItem(plan: Plan) {
   const prod = isProductionEnv();
 
-  // Observação: você comentou que “agora está 1 real”.
-  // Mantive 1 real em ambos por enquanto, mas removi "(teste)" em produção.
-  // Depois você pode voltar os preços reais quando quiser.
+  // ⚠️ Hoje está tudo por R$ 1 para testes (inclusive em produção).
+  // Quando você quiser voltar aos preços reais, basta trocar os valores de price aqui:
+  // 1h 14.90 | 2h 19.90 | day 29.90
   if (plan === "1h") {
     return {
       title: prod ? "Jornada — Passe 1 hora" : "Jornada — Passe 1 hora (teste)",
@@ -49,11 +54,56 @@ function planToItem(plan: Plan) {
   };
 }
 
+async function fetchUser(supabaseUrl: string, supabaseAnonKey: string, token: string) {
+  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonKey,
+    },
+  });
+
+  const user = await userRes.json().catch(() => null);
+  return { userRes, user };
+}
+
+async function fetchLatestActivePass(
+  supabaseUrl: string,
+  supabaseAnonKey: string,
+  token: string,
+  userId: string
+) {
+  // Usa o REST do Supabase (PostgREST), com o token do usuário.
+  // Isso respeita RLS. Como sua página /payment/pending consegue ler passes,
+  // isso deve funcionar.
+  const nowIso = new Date().toISOString();
+  const url =
+    `${supabaseUrl}/rest/v1/passes` +
+    `?select=id,status,expires_at` +
+    `&user_id=eq.${encodeURIComponent(userId)}` +
+    `&status=eq.active` +
+    `&expires_at=gt.${encodeURIComponent(nowIso)}` +
+    `&order=expires_at.desc` +
+    `&limit=1`;
+
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: supabaseAnonKey,
+      Accept: "application/json",
+    },
+  });
+
+  const data = await res.json().catch(() => null);
+  const pass = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  return { res, pass };
+}
+
 export async function POST(req: Request) {
   try {
     // 1) Lê o plano enviado pelo frontend
     const body = await req.json().catch(() => ({}));
     const plan = body?.plan as Plan | undefined;
+    const renewal = Boolean(body?.renewal);
 
     if (!plan || !["1h", "2h", "day"].includes(plan)) {
       return NextResponse.json(
@@ -87,14 +137,7 @@ export async function POST(req: Request) {
     }
 
     // 4) Confirma o usuário chamando o Supabase diretamente
-    const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: supabaseAnonKey,
-      },
-    });
-
-    const user = await userRes.json().catch(() => null);
+    const { userRes, user } = await fetchUser(supabaseUrl, supabaseAnonKey, token);
 
     if (!userRes.ok || !user?.id) {
       return NextResponse.json(
@@ -105,6 +148,53 @@ export async function POST(req: Request) {
         },
         { status: 401 }
       );
+    }
+
+    // 4.1) Se for renovação, valida no SERVIDOR que faltam <= 5 minutos
+    if (renewal) {
+      const { res: passRes, pass } = await fetchLatestActivePass(
+        supabaseUrl,
+        supabaseAnonKey,
+        token,
+        user.id
+      );
+
+      if (!passRes.ok) {
+        return NextResponse.json(
+          {
+            error: "Não consegui verificar seu passe para renovação.",
+            supabase_status: passRes.status,
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!pass?.expires_at) {
+        return NextResponse.json(
+          {
+            error:
+              "Renovação indisponível: não encontrei passe ativo válido agora.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const expiresAtMs = new Date(pass.expires_at).getTime();
+      const nowMs = Date.now();
+      const remainingMs = expiresAtMs - nowMs;
+
+      // Deve estar ativo e dentro da janela de 5 minutos (0 < restante <= 5min)
+      const fiveMinMs = 5 * 60 * 1000;
+      if (!(remainingMs > 0 && remainingMs <= fiveMinMs)) {
+        return NextResponse.json(
+          {
+            error:
+              "Renovação indisponível: só é permitida quando faltam 5 minutos ou menos.",
+            remaining_seconds: Math.floor(remainingMs / 1000),
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // 5) Variáveis do Mercado Pago
@@ -128,13 +218,23 @@ export async function POST(req: Request) {
     // 6) Monta o item
     const item = planToItem(plan);
 
+    // 6.1) Aplica desconto na renovação (50%)
+    // Obs: hoje o preço está 1.0 em todos os ambientes.
+    // Quando você voltar preços reais, a renovação vai automaticamente para metade.
+    const discountFactor = 0.5;
+    const unitPrice = renewal ? round2(item.price * discountFactor) : item.price;
+
+    const title = renewal
+      ? `${item.title} — Renovação (-50%)`
+      : item.title;
+
     // 7) Cria a preferência no Mercado Pago
     const preferencePayload = {
       items: [
         {
-          title: item.title,
+          title,
           quantity: 1,
-          unit_price: item.price,
+          unit_price: unitPrice,
           currency_id: "BRL",
         },
       ],
@@ -159,9 +259,13 @@ export async function POST(req: Request) {
         plan,
         seconds: item.seconds,
         vercel_env: getVercelEnv(),
+
+        // ✅ NOVO
+        is_renewal: renewal,
+        discount_factor: renewal ? discountFactor : 0,
       },
 
-      external_reference: `jornada:${user.id}:${plan}:${Date.now()}`,
+      external_reference: `jornada:${user.id}:${renewal ? "renewal" : "buy"}:${plan}:${Date.now()}`,
     };
 
     const mpRes = await fetch("https://api.mercadopago.com/checkout/preferences", {
@@ -188,7 +292,8 @@ export async function POST(req: Request) {
     const prod = isProductionEnv();
     const checkoutUrl = prod
       ? (mpJson?.init_point as string | undefined)
-      : (mpJson?.sandbox_init_point as string | undefined) ?? (mpJson?.init_point as string | undefined);
+      : (mpJson?.sandbox_init_point as string | undefined) ??
+        (mpJson?.init_point as string | undefined);
 
     if (!checkoutUrl) {
       return NextResponse.json(
@@ -204,6 +309,10 @@ export async function POST(req: Request) {
       vercelEnv: getVercelEnv(),
       chosen: prod ? "init_point" : "sandbox_init_point_or_init_point",
       hasSandboxUrl: Boolean(mpJson?.sandbox_init_point),
+
+      // ✅ NOVO (debug amigável)
+      renewal,
+      unitPrice,
     });
   } catch (err: any) {
     return NextResponse.json(
