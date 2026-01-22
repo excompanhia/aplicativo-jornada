@@ -12,6 +12,10 @@ function addSeconds(baseIso: string, seconds: number) {
   return new Date(base + seconds * 1000).toISOString();
 }
 
+function maxIso(aIso: string, bIso: string) {
+  return new Date(aIso).getTime() >= new Date(bIso).getTime() ? aIso : bIso;
+}
+
 export async function POST(req: Request) {
   try {
     const mpAccessToken = process.env.MP_ACCESS_TOKEN;
@@ -87,6 +91,9 @@ export async function POST(req: Request) {
     const metadata = payment.metadata || {};
     const externalReference: string | undefined = payment.external_reference;
 
+    // ✅ Renovação (vinda do checkout)
+    const isRenewal: boolean = Boolean(metadata.is_renewal);
+
     // Dados da preference
     let userId: string | undefined = metadata.user_id;
 
@@ -98,7 +105,7 @@ export async function POST(req: Request) {
       if (Number.isFinite(n)) seconds = n;
     }
 
-    // Fallback: jornada:${userId}:${plan}:${Date.now()}
+    // Fallback: jornada:${userId}:${...}
     if (!userId && typeof externalReference === "string") {
       const parts = externalReference.split(":");
       if (parts.length >= 2 && parts[0] === "jornada") {
@@ -160,8 +167,126 @@ export async function POST(req: Request) {
     const purchasedAt: string =
       payment.date_approved || payment.date_created || new Date().toISOString();
 
-    const expiresAt = addSeconds(purchasedAt, seconds);
     const durationMinutes = Math.round(seconds / 60);
+
+    // =========================
+    // ✅ RENOVAÇÃO: SOMA TEMPO
+    // =========================
+    if (isRenewal) {
+      // Pega o passe ativo atual do usuário (se houver)
+      const { data: activePass, error: activeErr } = await supabase
+        .from("passes")
+        .select("id, expires_at, status")
+        .eq("user_id", userId)
+        .eq("status", "active")
+        .order("expires_at", { ascending: false })
+        .maybeSingle();
+
+      if (activeErr) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Erro ao buscar passe ativo para renovação",
+            details: activeErr.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      // Base: se tiver passe ativo, soma em cima do expires_at dele (ou agora, se já passou)
+      const nowIso = new Date().toISOString();
+
+      const baseIso = activePass?.expires_at
+        ? maxIso(activePass.expires_at, nowIso)
+        : maxIso(purchasedAt, nowIso);
+
+      const newExpiresAt = addSeconds(baseIso, seconds);
+
+      if (activePass?.id) {
+        // Atualiza o passe ativo existente: soma tempo + marca active + registra payment
+        const { data: updated, error: updErr } = await supabase
+          .from("passes")
+          .update({
+            status: "active",
+            expires_at: newExpiresAt,
+            // registra o último pagamento associado (mantém rastreabilidade)
+            payment_provider: "mercadopago",
+            payment_id: mpPaymentId,
+            // opcional: manter duration_minutes como “última renovação”
+            duration_minutes: durationMinutes,
+            purchased_at: purchasedAt,
+          })
+          .eq("id", activePass.id)
+          .select("id, status, expires_at")
+          .single();
+
+        if (updErr || !updated?.id) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "Falha ao atualizar passe na renovação",
+              details: updErr?.message || "update sem id",
+            },
+            { status: 500 }
+          );
+        }
+
+        return NextResponse.json({
+          ok: true,
+          status,
+          createdPass: false,
+          renewed: true,
+          pass_id: updated.id,
+          pass_status: updated.status,
+          expires_at: updated.expires_at,
+        });
+      }
+
+      // Se não existia passe ativo (caso raro), cria um novo (e não precisa expirar outros)
+      const expiresAt = addSeconds(purchasedAt, seconds);
+
+      const passInsert = {
+        user_id: userId,
+        status: "active",
+        duration_minutes: durationMinutes,
+        purchased_at: purchasedAt,
+        expires_at: expiresAt,
+        payment_provider: "mercadopago",
+        payment_id: mpPaymentId,
+      };
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from("passes")
+        .insert(passInsert)
+        .select("id")
+        .single();
+
+      if (insertErr || !inserted?.id) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Falha ao criar passe (renovação sem ativo)",
+            details: insertErr?.message || "insert sem id",
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        status,
+        createdPass: true,
+        renewed: true,
+        pass_id: inserted.id,
+        pass_status: "active",
+        expires_at: expiresAt,
+      });
+    }
+
+    // =========================
+    // COMPRA NORMAL (como era)
+    // =========================
+    const expiresAt = addSeconds(purchasedAt, seconds);
 
     // ✅ Importante:
     // Mesmo que a gente insira "active", alguns setups no banco podem sobrescrever no INSERT.
