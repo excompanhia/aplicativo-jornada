@@ -8,6 +8,12 @@ export type EngineTrack = {
   audioSrc: string;
 };
 
+type PlayerState = {
+  currentTime: number;
+  duration: number;
+  paused: boolean;
+};
+
 export default function AudioEngine({
   track,
   onTimeUpdate,
@@ -16,104 +22,212 @@ export default function AudioEngine({
   requestSeekTo,
 }: {
   track: EngineTrack | null;
-  onTimeUpdate: (payload: { currentTime: number; duration: number; paused: boolean }) => void;
+  onTimeUpdate: (s: PlayerState) => void;
   requestPlay: number;
   requestPause: number;
   requestSeekTo: number | null;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // cria o <audio> uma única vez e registra eventos
+  // guardamos o src “real” em blob URL
+  const objectUrlRef = useRef<string | null>(null);
+
+  // estado interno para retomar “sem susto”
+  const lastTimeRef = useRef(0);
+  const wasPlayingRef = useRef(false);
+
+  function cleanupObjectUrl() {
+    if (objectUrlRef.current) {
+      try {
+        URL.revokeObjectURL(objectUrlRef.current);
+      } catch {}
+      objectUrlRef.current = null;
+    }
+  }
+
+  async function loadTrackAsBlob(next: EngineTrack) {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    // pausa enquanto troca a fonte
+    try {
+      audio.pause();
+    } catch {}
+
+    // limpa blob anterior
+    cleanupObjectUrl();
+
+    // baixa o arquivo inteiro (vai passar pelo SW e cache)
+    // cache: "force-cache" ajuda a preferir cache quando existir
+    const res = await fetch(next.audioSrc, { cache: "force-cache" });
+    if (!res.ok) throw new Error(`Falha ao carregar áudio: ${res.status}`);
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    objectUrlRef.current = url;
+
+    audio.src = url;
+    audio.load();
+  }
+
+  // Atualiza “estado do player” para UI
+  function emitState() {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    const paused = audio.paused;
+
+    lastTimeRef.current = currentTime;
+    wasPlayingRef.current = !paused;
+
+    onTimeUpdate({ currentTime, duration, paused });
+  }
+
+  // Quando track muda: carrega como blob (imune a rede)
   useEffect(() => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-      audioRef.current.preload = "auto";
-      // @ts-ignore
-      audioRef.current.playsInline = true;
+    let cancelled = false;
+
+    async function run() {
+      if (!track) return;
+
+      try {
+        await loadTrackAsBlob(track);
+
+        if (cancelled) return;
+
+        // depois de carregar, emite estado (duration etc.)
+        // e mantém pausado por padrão (Journey controla play)
+        emitState();
+      } catch (e) {
+        // se falhar, pelo menos não quebra silenciosamente
+        console.error("AudioEngine: erro ao carregar blob:", e);
+      }
     }
 
-    const a = audioRef.current;
-
-    const tick = () => {
-      onTimeUpdate({
-        currentTime: a.currentTime || 0,
-        duration: Number.isFinite(a.duration) ? a.duration : 0,
-        paused: a.paused,
-      });
-    };
-
-    a.addEventListener("timeupdate", tick);
-    a.addEventListener("play", tick);
-    a.addEventListener("pause", tick);
-    a.addEventListener("loadedmetadata", tick);
+    run();
 
     return () => {
-      a.removeEventListener("timeupdate", tick);
-      a.removeEventListener("play", tick);
-      a.removeEventListener("pause", tick);
-      a.removeEventListener("loadedmetadata", tick);
+      cancelled = true;
     };
-  }, [onTimeUpdate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track?.id]);
 
-  // troca de estação: pausa e carrega novo áudio (sem autoplay)
+  // Eventos do elemento de áudio
   useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    if (!track) {
-      a.pause();
-      a.removeAttribute("src");
-      a.load();
-      return;
-    }
+    const onTime = () => emitState();
+    const onLoaded = () => emitState();
+    const onPlay = () => emitState();
+    const onPause = () => emitState();
+    const onEnded = () => emitState();
 
-    a.pause();
-    a.src = track.audioSrc;
-    a.load();
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
 
-    // Media Session (tela bloqueada / controles)
-    // @ts-ignore
-    const ms: MediaSession | undefined = navigator.mediaSession;
-    if (ms) {
-      ms.metadata = new MediaMetadata({
-        title: track.title,
-        artist: "Jornada",
-        album: "Jornada",
-      });
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      ms.setActionHandler("play", () => a.play().catch(() => {}));
-      ms.setActionHandler("pause", () => a.pause());
-      ms.setActionHandler("seekbackward", () => {
-        a.currentTime = Math.max(0, (a.currentTime || 0) - 10);
-      });
-      ms.setActionHandler("seekforward", () => {
-        a.currentTime = Math.min(a.duration || 1e9, (a.currentTime || 0) + 10);
-      });
-    }
-  }, [track?.id, track?.audioSrc, track?.title]);
-
-  // pedidos vindos da UI
+  // Play signal
   useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.play().catch(() => {});
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (!track) return;
+
+    // tenta tocar; browsers podem bloquear autoplay se não for gesto — mas aqui vem do botão
+    audio
+      .play()
+      .then(() => {
+        wasPlayingRef.current = true;
+        emitState();
+      })
+      .catch((e) => {
+        console.warn("AudioEngine: play() bloqueado/erro:", e);
+        emitState();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestPlay]);
 
+  // Pause signal
   useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.pause();
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    try {
+      audio.pause();
+    } catch {}
+    wasPlayingRef.current = false;
+    emitState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestPause]);
 
+  // Seek signal
   useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
+    const audio = audioRef.current;
+    if (!audio) return;
     if (requestSeekTo === null) return;
+
     try {
-      a.currentTime = Math.max(0, requestSeekTo);
+      audio.currentTime = Math.max(0, requestSeekTo);
     } catch {}
+    emitState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestSeekTo]);
 
-  return null; // não aparece na tela
-}
+  // “Blindagem” extra: se voltar online e o browser fizer qualquer coisa,
+  // tentamos manter o estado (especialmente se estava tocando).
+  useEffect(() => {
+    function onOnline() {
+      const audio = audioRef.current;
+      if (!audio) return;
 
+      // se estava tocando, garante que continua tocando no mesmo ponto
+      const t = lastTimeRef.current || 0;
+
+      try {
+        audio.currentTime = t;
+      } catch {}
+
+      if (wasPlayingRef.current) {
+        audio.play().catch(() => {});
+      }
+
+      emitState();
+    }
+
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // cleanup ao desmontar
+  useEffect(() => {
+    return () => {
+      cleanupObjectUrl();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <audio
+      ref={audioRef}
+      preload="auto"
+      playsInline
+      // controls={false} // deixamos sem controls; UI é do Journey
+    />
+  );
+}
