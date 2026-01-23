@@ -32,7 +32,7 @@ export default function AudioEngine({
   // guardamos o src “real” em blob URL
   const objectUrlRef = useRef<string | null>(null);
 
-  // estado interno para retomar “sem susto”
+  // estado interno para UI / debug
   const lastTimeRef = useRef(0);
   const wasPlayingRef = useRef(false);
 
@@ -57,8 +57,7 @@ export default function AudioEngine({
     // limpa blob anterior
     cleanupObjectUrl();
 
-    // baixa o arquivo inteiro (vai passar pelo SW e cache)
-    // cache: "force-cache" ajuda a preferir cache quando existir
+    // baixa o arquivo inteiro (passa pelo SW/cache)
     const res = await fetch(next.audioSrc, { cache: "force-cache" });
     if (!res.ok) throw new Error(`Falha ao carregar áudio: ${res.status}`);
 
@@ -70,7 +69,6 @@ export default function AudioEngine({
     audio.load();
   }
 
-  // Atualiza “estado do player” para UI
   function emitState() {
     const audio = audioRef.current;
     if (!audio) return;
@@ -94,20 +92,16 @@ export default function AudioEngine({
 
       try {
         await loadTrackAsBlob(track);
-
         if (cancelled) return;
 
-        // depois de carregar, emite estado (duration etc.)
-        // e mantém pausado por padrão (Journey controla play)
+        // Emite estado (duration etc.). Mantém pausado por padrão.
         emitState();
       } catch (e) {
-        // se falhar, pelo menos não quebra silenciosamente
         console.error("AudioEngine: erro ao carregar blob:", e);
       }
     }
 
     run();
-
     return () => {
       cancelled = true;
     };
@@ -145,10 +139,8 @@ export default function AudioEngine({
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-
     if (!track) return;
 
-    // tenta tocar; browsers podem bloquear autoplay se não for gesto — mas aqui vem do botão
     audio
       .play()
       .then(() => {
@@ -188,32 +180,6 @@ export default function AudioEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestSeekTo]);
 
-  // “Blindagem” extra: se voltar online e o browser fizer qualquer coisa,
-  // tentamos manter o estado (especialmente se estava tocando).
-  useEffect(() => {
-    function onOnline() {
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      // se estava tocando, garante que continua tocando no mesmo ponto
-      const t = lastTimeRef.current || 0;
-
-      try {
-        audio.currentTime = t;
-      } catch {}
-
-      if (wasPlayingRef.current) {
-        audio.play().catch(() => {});
-      }
-
-      emitState();
-    }
-
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // cleanup ao desmontar
   useEffect(() => {
     return () => {
@@ -222,12 +188,5 @@ export default function AudioEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
-    <audio
-      ref={audioRef}
-      preload="auto"
-      playsInline
-      // controls={false} // deixamos sem controls; UI é do Journey
-    />
-  );
+  return <audio ref={audioRef} preload="auto" playsInline />;
 }
