@@ -42,12 +42,26 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const warnedRef = useRef(false);
   const tickRef = useRef<number | null>(null);
 
+  // ✅ Depois que entrou com passe válido, NÃO reavalia durante a sessão
+  const accessGrantedRef = useRef(false);
+
+  // ✅ Fonte da verdade do tempo (vem do Supabase)
+  const expiresAtMsRef = useRef<number | null>(null);
+
   const [showWarning, setShowWarning] = useState(false);
-  const [renewing, setRenewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadPass() {
+  function computeRemainingFromExpiry() {
+    const expMs = expiresAtMsRef.current;
+    if (!expMs) return 0;
+    return Math.floor((expMs - Date.now()) / 1000);
+  }
+
+  async function loadPassOnce() {
     setError(null);
+
+    // ✅ Se já foi liberado uma vez nesta sessão, não revalida
+    if (accessGrantedRef.current) return;
 
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
@@ -78,14 +92,19 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
+    // ✅ A verdade do tempo é o expires_at do Supabase
     const expiraMs = new Date(row.expires_at).getTime();
-    const agoraMs = Date.now();
-    const rest = Math.floor((expiraMs - agoraMs) / 1000);
+    expiresAtMsRef.current = expiraMs;
+
+    const rest = computeRemainingFromExpiry();
 
     if (rest <= 0) {
       router.replace("/expired");
       return;
     }
+
+    // ✅ Agora a sessão está liberada. Não revalidamos novamente até sair da Journey.
+    accessGrantedRef.current = true;
 
     setPass(row);
     setRemainingSeconds(rest);
@@ -93,82 +112,74 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    loadPass();
+    loadPassOnce();
 
+    // ✅ Cronômetro robusto: recalcula SEMPRE via expires_at - agora
     tickRef.current = window.setInterval(() => {
-      setRemainingSeconds((prev) => {
-        const next = prev - 1;
+      const next = computeRemainingFromExpiry();
 
-        if (next <= 0) {
-          router.replace("/expired");
-          return 0;
-        }
+      if (next <= 0) {
+        setRemainingSeconds(0);
+        router.replace("/expired");
+        return;
+      }
 
-        // ✅ quando chegar nos 5 minutos, além de abrir o aviso, manda pausar o áudio
-        if (!warnedRef.current && next <= 300) {
-          warnedRef.current = true;
-          setShowWarning(true);
+      setRemainingSeconds(next);
 
-          // pausa o áudio imediatamente (o cronômetro continua)
-          pauseAudioNow();
-        }
+      if (!warnedRef.current && next <= 300) {
+        warnedRef.current = true;
+        setShowWarning(true);
 
-        return next;
-      });
+        // pausa o áudio imediatamente (o cronômetro continua)
+        pauseAudioNow();
+      }
     }, 1000);
+
+    // ✅ Se o usuário saiu do app e voltou, recalcula imediatamente (sem “congelar” tempo)
+    function onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        const next = computeRemainingFromExpiry();
+        if (next <= 0) {
+          setRemainingSeconds(0);
+          router.replace("/expired");
+        } else {
+          setRemainingSeconds(next);
+        }
+      }
+    }
+
+    // ✅ Se voltou online, recalcula, mas NÃO mexe na UX (zero redirect / zero reset)
+    function onOnline() {
+      const next = computeRemainingFromExpiry();
+      if (next > 0) setRemainingSeconds(next);
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onOnline);
 
     return () => {
       if (tickRef.current) window.clearInterval(tickRef.current);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onOnline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function renewSamePlanHalf() {
-    setError(null);
-    if (!pass) return;
-
-    setRenewing(true);
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const session = sessionData.session;
-
-    if (!session) {
-      setRenewing(false);
-      router.replace("/login");
-      return;
-    }
-
-    const uid = session.user.id;
-    const minutos = pass.duration_minutes;
-
-    const baseMs = Math.max(Date.now(), new Date(pass.expires_at).getTime());
-    const newExpires = new Date(baseMs + minutos * 60 * 1000);
-
-    const { error: insErr } = await supabase.from("passes").insert([
-      {
-        user_id: uid,
-        status: "active",
-        duration_minutes: minutos,
-        purchased_at: new Date().toISOString(),
-        expires_at: newExpires.toISOString(),
-        payment_provider: "manual_renew_50",
-        payment_id: null,
-      },
-    ]);
-
-    setRenewing(false);
-
-    if (insErr) {
-      setError("Não foi possível renovar agora: " + insErr.message);
-      return;
-    }
-
-    setShowWarning(false);
-    await loadPass();
-  }
-
   function buyPlan(plano: "1h" | "2h" | "day") {
     router.push("/checkout?plano=" + plano);
+  }
+
+  // ✅ Renovação: aqui a UX manda para o checkout (o webhook é quem soma tempo)
+  function renewSamePlanHalfCheckout() {
+    if (!pass) return;
+
+    // mapeia duration_minutes -> plano
+    const mins = pass.duration_minutes;
+    const plano: "1h" | "2h" | "day" =
+      mins === 60 ? "1h" : mins === 120 ? "2h" : "day";
+
+    // ✅ sinaliza renovação no checkout (o seu checkout já manda metadata.is_renewal = true)
+    router.push(`/checkout?plano=${plano}&renew=1`);
   }
 
   if (loading) {
@@ -251,15 +262,13 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
             )}
 
             {error && (
-              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>
-                {error}
-              </div>
+              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>{error}</div>
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
               <button
                 type="button"
-                onClick={renewSamePlanHalf}
+                onClick={renewSamePlanHalfCheckout}
                 style={{
                   width: "100%",
                   height: 52,
@@ -268,10 +277,9 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
                   background: "white",
                   fontSize: 16,
                   cursor: "pointer",
-                  opacity: renewing ? 0.6 : 1,
                 }}
               >
-                {renewing ? "Renovando..." : "Renovar este plano — 50% de desconto"}
+                Renovar este plano — 50% de desconto
               </button>
 
               <button
