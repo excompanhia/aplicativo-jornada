@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
@@ -19,6 +19,47 @@ export default function PaymentPendingPage() {
   const [lastCheck, setLastCheck] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+
+  // ===== Polling progressivo (anti-enxame) =====
+  // sequência de intervalos entre checagens automáticas
+  const SCHEDULE_MS = [5000, 10000, 20000, 30000]; // depois mantém 30s
+  const MAX_TOTAL_MS = 3 * 60 * 1000; // ~3 minutos (ajuste aqui se quiser)
+
+  const scheduleIndexRef = useRef(0);
+  const startedAtRef = useRef<number>(0);
+  const timeoutRef = useRef<number | null>(null);
+
+  function clearTimer() {
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }
+
+  function scheduleNextTick() {
+    clearTimer();
+
+    const startedAt = startedAtRef.current || Date.now();
+    const elapsed = Date.now() - startedAt;
+
+    // já passou do tempo máximo -> para polling automático
+    if (elapsed >= MAX_TOTAL_MS) {
+      setStatusText(
+        "Ainda aguardando confirmação… Se você já pagou, toque em “verificar agora”."
+      );
+      return;
+    }
+
+    const idx = scheduleIndexRef.current;
+    const waitMs =
+      idx < SCHEDULE_MS.length ? SCHEDULE_MS[idx] : SCHEDULE_MS[SCHEDULE_MS.length - 1];
+
+    timeoutRef.current = window.setTimeout(async () => {
+      await checkPassOnce();
+      scheduleIndexRef.current = idx + 1; // vai ficando mais lento
+      scheduleNextTick();
+    }, waitMs);
+  }
 
   async function checkPassOnce() {
     if (isChecking) return;
@@ -79,16 +120,28 @@ export default function PaymentPendingPage() {
     }
   }
 
+  function forceCheckNow() {
+    // clique manual: checa agora e "reinicia" o backoff
+    scheduleIndexRef.current = 0;
+    startedAtRef.current = Date.now();
+    clearTimer();
+    checkPassOnce().finally(() => {
+      scheduleNextTick();
+    });
+  }
+
   useEffect(() => {
-    // Checa ao abrir
-    checkPassOnce();
+    // inicia contagem e faz a primeira checagem
+    startedAtRef.current = Date.now();
+    scheduleIndexRef.current = 0;
 
-    // Polling: checa a cada 3 segundos
-    const t = setInterval(() => {
-      checkPassOnce();
-    }, 3000);
+    checkPassOnce().finally(() => {
+      scheduleNextTick();
+    });
 
-    return () => clearInterval(t);
+    return () => {
+      clearTimer();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -109,7 +162,7 @@ export default function PaymentPendingPage() {
       )}
 
       <button
-        onClick={checkPassOnce}
+        onClick={forceCheckNow}
         style={{
           height: 48,
           borderRadius: 14,
