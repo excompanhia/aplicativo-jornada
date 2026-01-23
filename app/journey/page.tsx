@@ -5,6 +5,11 @@ import Link from "next/link";
 import { stations } from "../lib/stations";
 import { collectStationAssets } from "@/app/lib/preloadStations";
 import { preloadAssets } from "@/app/lib/preloadRunner";
+import {
+  ensureManifestForUrls,
+  filterMissingUrls,
+  markUrlOk,
+} from "@/app/lib/preloadManifest";
 import AudioEngine, { EngineTrack } from "../components/AudioEngine";
 import { onPauseAudioNow } from "../lib/appEvents";
 import AccessGuard from "./AccessGuard";
@@ -169,7 +174,7 @@ export default function JourneyPage() {
   }, []);
 
   // =========================
-  // PRELOAD OFFLINE PROGRESSIVO
+  // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA)
   // =========================
   const preloadStartedRef = useRef(false);
   useEffect(() => {
@@ -178,10 +183,27 @@ export default function JourneyPage() {
 
     const urls = collectStationAssets(stations);
 
-    preloadAssets(urls, {
+    // garante que a "memória" corresponde ao conjunto atual
+    const { cleared } = ensureManifestForUrls(urls);
+    if (cleared) {
+      console.log("Preload manifest resetado (mudança de assets)");
+    }
+
+    // só baixa o que ainda não temos
+    const missing = filterMissingUrls(urls);
+
+    if (missing.length === 0) {
+      console.log("Todos os assets já estão disponíveis offline");
+      return;
+    }
+
+    preloadAssets(missing, {
       delayMs: 300,
       onProgress: (currentNum, total, url) => {
         console.log(`Offline preload ${currentNum}/${total}`, url);
+      },
+      onResult: (url, ok) => {
+        if (ok) markUrlOk(url);
       },
     });
   }, []);
