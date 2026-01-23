@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { stations } from "../lib/stations";
-import { collectStationAssets } from "../lib/preloadStations";
-import { preloadAssets } from "../lib/preloadRunner";
+import { collectStationAssets } from "@/app/lib/preloadStations";
+import { preloadAssets } from "@/app/lib/preloadRunner";
 import AudioEngine, { EngineTrack } from "../components/AudioEngine";
 import { onPauseAudioNow } from "../lib/appEvents";
 import AccessGuard from "./AccessGuard";
@@ -12,8 +12,8 @@ import AccessGuard from "./AccessGuard";
 type Direction = "left" | "right" | "none";
 
 export default function JourneyPage() {
+  // índice = qual estação está na tela
   const [index, setIndex] = useState(0);
-  const current = stations[index];
 
   // swipe
   const startX = useRef<number | null>(null);
@@ -21,22 +21,28 @@ export default function JourneyPage() {
   const [dragX, setDragX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
 
+  const current = stations[index];
+
+  // memória por estação: onde cada áudio parou (RAM)
+  const positionsRef = useRef<Record<string, number>>({});
+
   // estado do player
-  const [playerState, setPlayerState] = useState({
+  const [playerState, setPlayerState] = useState<{
+    currentTime: number;
+    duration: number;
+    paused: boolean;
+  }>({
     currentTime: 0,
     duration: 0,
     paused: true,
   });
 
-  // sinais para o AudioEngine
+  // sinais para o motor executar ações
   const [playSignal, setPlaySignal] = useState(0);
   const [pauseSignal, setPauseSignal] = useState(0);
   const [seekTo, setSeekTo] = useState<number | null>(null);
 
-  // memória de posição por estação (em RAM)
-  const positionsRef = useRef<Record<string, number>>({});
-
-  // troca de estação: pausa, salva posição, aplica posição da nova
+  // Ao trocar de estação: salva posição anterior, pausa, aplica posição da nova
   const prevStationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -47,8 +53,10 @@ export default function JourneyPage() {
       positionsRef.current[prevId] = playerState.currentTime;
     }
 
+    // pausa sempre que muda de estação
     setPauseSignal((n) => n + 1);
 
+    // aplica posição salva da estação atual
     if (nowId) {
       const pos = positionsRef.current[nowId] ?? 0;
       setSeekTo(pos);
@@ -58,7 +66,7 @@ export default function JourneyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  // pausa global (ex: aviso 5 min)
+  // Se o aviso de 5 minutos aparecer, pausa o áudio automaticamente
   useEffect(() => {
     return onPauseAudioNow(() => {
       setPauseSignal((n) => n + 1);
@@ -84,24 +92,20 @@ export default function JourneyPage() {
     });
   }, []);
 
-  // track atual
+  // track atual para o motor
   const track: EngineTrack | null = useMemo(() => {
     if (!current) return null;
-    return {
-      id: current.id,
-      title: current.title,
-      audioSrc: current.audioSrc,
-    };
+    return { id: current.id, title: current.title, audioSrc: current.audioSrc };
   }, [current]);
 
   // limites
   const canGoPrev = index > 0;
   const canGoNext = index < stations.length - 1;
 
-  function clampIndex(n: number) {
-    if (n < 0) return 0;
-    if (n > stations.length - 1) return stations.length - 1;
-    return n;
+  function clampIndex(next: number) {
+    if (next < 0) return 0;
+    if (next > stations.length - 1) return stations.length - 1;
+    return next;
   }
 
   function goNext() {
@@ -112,7 +116,7 @@ export default function JourneyPage() {
     setIndex((v) => clampIndex(v - 1));
   }
 
-  // swipe handlers
+  // swipe: quando encosta
   function onPointerDown(e: React.PointerEvent) {
     if (isAnimating) return;
     startX.current = e.clientX;
@@ -120,6 +124,7 @@ export default function JourneyPage() {
     setDragX(0);
   }
 
+  // swipe: enquanto arrasta
   function onPointerMove(e: React.PointerEvent) {
     if (startX.current === null || isAnimating) return;
     const dx = e.clientX - startX.current;
@@ -127,6 +132,7 @@ export default function JourneyPage() {
     setDragX(dx);
   }
 
+  // swipe: quando solta
   function onPointerUp() {
     if (startX.current === null || isAnimating) return;
 
@@ -164,12 +170,12 @@ export default function JourneyPage() {
 
   // teclas (desktop / teste)
   useEffect(() => {
-    function onKey(ev: KeyboardEvent) {
+    function onKeyDown(ev: KeyboardEvent) {
       if (ev.key === "ArrowLeft") goPrev();
       if (ev.key === "ArrowRight") goNext();
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -177,17 +183,19 @@ export default function JourneyPage() {
     <AccessGuard>
       <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         {/* Topo */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Link href="/library" style={{ fontSize: 13, textDecoration: "none" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Link href="/library" style={{ textDecoration: "none", fontSize: 13 }}>
             ← Biblioteca
           </Link>
-          <div style={{ fontSize: 13, opacity: 0.7 }}>
+
+          <div style={{ fontSize: 13, opacity: 0.75 }}>
             {index + 1} / {stations.length}
           </div>
+
           <div style={{ width: 72 }} />
         </div>
 
-        {/* Estação */}
+        {/* Tela da estação */}
         <div
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -210,18 +218,45 @@ export default function JourneyPage() {
             playerState={playerState}
             onPlay={() => setPlaySignal((n) => n + 1)}
             onPause={() => setPauseSignal((n) => n + 1)}
-            onSeek={(t) => setSeekTo(t)}
+            onSeek={(t: number) => setSeekTo(t)}
           />
         </div>
 
         {/* Botões */}
         <div style={{ display: "flex", gap: 12 }}>
-          <button onClick={goPrev} disabled={!canGoPrev} style={navBtn(canGoPrev)}>
+          <button
+            onClick={goPrev}
+            disabled={!canGoPrev}
+            style={{
+              flex: 1,
+              height: 52,
+              borderRadius: 16,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              opacity: canGoPrev ? 1 : 0.4,
+            }}
+          >
             ← Anterior
           </button>
-          <button onClick={goNext} disabled={!canGoNext} style={navBtn(canGoNext)}>
+
+          <button
+            onClick={goNext}
+            disabled={!canGoNext}
+            style={{
+              flex: 1,
+              height: 52,
+              borderRadius: 16,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              opacity: canGoNext ? 1 : 0.4,
+            }}
+          >
             Próxima →
           </button>
+        </div>
+
+        <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.3, textAlign: "center" }}>
+          Dica: arraste para a esquerda/direita como um story.
         </div>
 
         <AudioEngine
@@ -236,17 +271,6 @@ export default function JourneyPage() {
   );
 }
 
-function navBtn(enabled: boolean) {
-  return {
-    flex: 1,
-    height: 52,
-    borderRadius: 16,
-    border: "1px solid rgba(0,0,0,0.15)",
-    background: "white",
-    opacity: enabled ? 1 : 0.4,
-  };
-}
-
 function StationView({
   title,
   text,
@@ -259,12 +283,16 @@ function StationView({
   title: string;
   text: string;
   images: string[];
-  playerState: { currentTime: number; duration: number; paused: boolean };
+  playerState: {
+    currentTime: number;
+    duration: number;
+    paused: boolean;
+  };
   onPlay: () => void;
   onPause: () => void;
   onSeek: (t: number) => void;
 }) {
-  function format(seconds: number) {
+  function formatTime(seconds: number) {
     const s = Math.floor(seconds || 0);
     const m = Math.floor(s / 60);
     const r = s % 60;
@@ -278,23 +306,46 @@ function StationView({
       <AutoGallery images={images} seconds={3.5} />
 
       <div style={{ borderRadius: 16, border: "1px solid rgba(0,0,0,0.15)", padding: 12 }}>
-        <button onClick={playerState.paused ? onPlay : onPause}>
-          {playerState.paused ? "Play" : "Pause"}
-        </button>
-        <div style={{ fontSize: 12, opacity: 0.7 }}>
-          {format(playerState.currentTime)} / {format(playerState.duration)}
+        <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 6 }}>Áudio</div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={playerState.paused ? onPlay : onPause}
+            style={{
+              height: 44,
+              padding: "0 14px",
+              borderRadius: 14,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              fontWeight: 600,
+            }}
+          >
+            {playerState.paused ? "Play" : "Pausar"}
+          </button>
+
+          <div style={{ fontSize: 12, opacity: 0.75 }}>
+            {formatTime(playerState.currentTime)} / {formatTime(playerState.duration)}
+          </div>
         </div>
+
         <input
           type="range"
           min={0}
           max={Math.max(1, playerState.duration)}
-          value={Math.min(playerState.currentTime, playerState.duration)}
+          value={Math.min(playerState.currentTime, playerState.duration || 0)}
           onChange={(e) => onSeek(Number(e.target.value))}
-          style={{ width: "100%" }}
+          style={{ width: "100%", marginTop: 10 }}
         />
       </div>
 
-      <div style={{ borderRadius: 16, border: "1px solid rgba(0,0,0,0.15)", padding: 14 }}>
+      <div
+        style={{
+          borderRadius: 16,
+          border: "1px solid rgba(0,0,0,0.15)",
+          padding: 14,
+          lineHeight: 1.45,
+        }}
+      >
         {text}
       </div>
     </div>
@@ -304,23 +355,95 @@ function StationView({
 function AutoGallery({ images, seconds }: { images: string[]; seconds: number }) {
   const [i, setI] = useState(0);
 
-  useEffect(() => {
-    setI(0);
-  }, [images]);
+  useEffect(() => setI(0), [images]);
 
   useEffect(() => {
+    if (!images || images.length === 0) return;
+
     const id = window.setInterval(() => {
-      setI((v) => (v + 1) % images.length);
-    }, seconds * 1000);
+      setI((prev) => (prev + 1) % images.length);
+    }, Math.round(seconds * 1000));
+
     return () => window.clearInterval(id);
   }, [images, seconds]);
 
+  const total = images.length;
+  const currentSrc = images[i] || "";
+
   return (
-    <div style={{ height: 260, overflow: "hidden" }}>
-      <img
-        src={images[i]}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
+    <div
+      style={{
+        borderRadius: 16,
+        border: "1px solid rgba(0,0,0,0.15)",
+        overflow: "hidden",
+        position: "relative",
+        height: 260,
+        background: "rgba(0,0,0,0.03)",
+      }}
+    >
+      {total > 0 ? (
+        <img
+          src={currentSrc}
+          alt=""
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ) : (
+        <div
+          style={{
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: 0.7,
+          }}
+        >
+          (Sem imagens)
+        </div>
+      )}
+
+      {total > 1 && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            left: 0,
+            right: 0,
+            display: "flex",
+            justifyContent: "center",
+            gap: 6,
+          }}
+        >
+          {images.map((_, idx) => (
+            <div
+              key={idx}
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.8)",
+                background: idx === i ? "white" : "rgba(255,255,255,0.35)",
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {total > 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 10,
+            fontSize: 12,
+            padding: "4px 8px",
+            borderRadius: 999,
+            background: "rgba(0,0,0,0.45)",
+            color: "white",
+          }}
+        >
+          {i + 1}/{total}
+        </div>
+      )}
     </div>
   );
 }
