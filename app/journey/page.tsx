@@ -11,9 +11,13 @@ import AccessGuard from "./AccessGuard";
 
 type Direction = "left" | "right" | "none";
 
+const KEY_INDEX = "jornada:journey:index";
+const KEY_PLAYING = "jornada:journey:playing";
+const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
+
 export default function JourneyPage() {
-  // índice = qual estação está na tela
   const [index, setIndex] = useState(0);
+  const current = stations[index];
 
   // swipe
   const startX = useRef<number | null>(null);
@@ -21,12 +25,7 @@ export default function JourneyPage() {
   const [dragX, setDragX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  const current = stations[index];
-
-  // memória por estação: onde cada áudio parou (RAM)
-  const positionsRef = useRef<Record<string, number>>({});
-
-  // estado do player
+  // player state
   const [playerState, setPlayerState] = useState<{
     currentTime: number;
     duration: number;
@@ -37,38 +36,134 @@ export default function JourneyPage() {
     paused: true,
   });
 
-  // sinais para o motor executar ações
+  // AudioEngine signals
   const [playSignal, setPlaySignal] = useState(0);
   const [pauseSignal, setPauseSignal] = useState(0);
   const [seekTo, setSeekTo] = useState<number | null>(null);
 
-  // Ao trocar de estação: salva posição anterior, pausa, aplica posição da nova
-  const prevStationIdRef = useRef<string | null>(null);
+  // refs do último estado (pra salvar “na marra” mesmo se tudo estiver mudando)
+  const latestIndexRef = useRef(0);
+  const latestStationIdRef = useRef<string | null>(null);
+  const latestTimeRef = useRef(0);
+  const latestPausedRef = useRef(true);
 
   useEffect(() => {
-    const nowId = current?.id ?? null;
-    const prevId = prevStationIdRef.current;
+    latestIndexRef.current = index;
+  }, [index]);
 
-    if (prevId && prevId !== nowId) {
-      positionsRef.current[prevId] = playerState.currentTime;
-    }
-
-    // pausa sempre que muda de estação
-    setPauseSignal((n) => n + 1);
-
-    // aplica posição salva da estação atual
-    if (nowId) {
-      const pos = positionsRef.current[nowId] ?? 0;
-      setSeekTo(pos);
-    }
-
-    prevStationIdRef.current = nowId;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    latestStationIdRef.current = current?.id ?? null;
   }, [current?.id]);
 
-  // Se o aviso de 5 minutos aparecer, pausa o áudio automaticamente
+  useEffect(() => {
+    latestTimeRef.current = playerState.currentTime || 0;
+    latestPausedRef.current = playerState.paused;
+  }, [playerState.currentTime, playerState.paused]);
+
+  function safeSet(key: string, value: string) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {}
+  }
+  function safeGet(key: string) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  function saveSnapshot() {
+    const stationId = latestStationIdRef.current;
+    if (!stationId) return;
+
+    safeSet(KEY_INDEX, String(latestIndexRef.current));
+    safeSet(KEY_PLAYING, String(!latestPausedRef.current));
+    safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
+  }
+
+  // ✅ restaura após reload (ou primeira entrada)
+  const restoredOnceRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (restoredOnceRef.current) return;
+    restoredOnceRef.current = true;
+
+    const rawIndex = safeGet(KEY_INDEX);
+    const n = rawIndex ? Number(rawIndex) : 0;
+    const safeIndex =
+      Number.isFinite(n) ? Math.max(0, Math.min(stations.length - 1, n)) : 0;
+
+    const wasPlaying = safeGet(KEY_PLAYING) === "true";
+
+    // 1) seta a estação
+    setIndex(safeIndex);
+
+    // 2) depois de render, aplica o seek e retoma
+    window.setTimeout(() => {
+      const st = stations[safeIndex];
+      if (!st?.id) return;
+
+      const rawPos = safeGet(KEY_POS_PREFIX + st.id);
+      const pos = rawPos ? Number(rawPos) : 0;
+      const safePos = Number.isFinite(pos) ? Math.max(0, pos) : 0;
+
+      setSeekTo(safePos);
+
+      if (wasPlaying) {
+        // dá um tempo pro seek “pegar”
+        window.setTimeout(() => setPlaySignal((v) => v + 1), 250);
+      }
+    }, 250);
+  }, []);
+
+  // ✅ salva continuamente enquanto toca (para “blindar” contra reload do SO)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const id = window.setInterval(() => {
+      if (!latestPausedRef.current) saveSnapshot();
+    }, 900);
+
+    return () => window.clearInterval(id);
+  }, []);
+
+  // ✅ salva em momentos críticos
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    function onPageHide() {
+      saveSnapshot();
+    }
+    function onVis() {
+      if (document.visibilityState !== "visible") saveSnapshot();
+    }
+    function onOffline() {
+      saveSnapshot();
+    }
+    function onOnline() {
+      // não muda UX — só salva
+      saveSnapshot();
+    }
+
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
+
+  // pausa global (aviso 5 min)
   useEffect(() => {
     return onPauseAudioNow(() => {
+      safeSet(KEY_PLAYING, "false");
+      saveSnapshot();
       setPauseSignal((n) => n + 1);
     });
   }, []);
@@ -77,7 +172,6 @@ export default function JourneyPage() {
   // PRELOAD OFFLINE PROGRESSIVO
   // =========================
   const preloadStartedRef = useRef(false);
-
   useEffect(() => {
     if (preloadStartedRef.current) return;
     preloadStartedRef.current = true;
@@ -92,31 +186,35 @@ export default function JourneyPage() {
     });
   }, []);
 
-  // track atual para o motor
+  // track atual
   const track: EngineTrack | null = useMemo(() => {
     if (!current) return null;
     return { id: current.id, title: current.title, audioSrc: current.audioSrc };
   }, [current]);
 
-  // limites
+  // navegação
   const canGoPrev = index > 0;
   const canGoNext = index < stations.length - 1;
 
-  function clampIndex(next: number) {
-    if (next < 0) return 0;
-    if (next > stations.length - 1) return stations.length - 1;
-    return next;
+  function clampIndex(n: number) {
+    if (n < 0) return 0;
+    if (n > stations.length - 1) return stations.length - 1;
+    return n;
   }
 
   function goNext() {
+    saveSnapshot();
+    setPauseSignal((v) => v + 1);
     setIndex((v) => clampIndex(v + 1));
   }
 
   function goPrev() {
+    saveSnapshot();
+    setPauseSignal((v) => v + 1);
     setIndex((v) => clampIndex(v - 1));
   }
 
-  // swipe: quando encosta
+  // swipe
   function onPointerDown(e: React.PointerEvent) {
     if (isAnimating) return;
     startX.current = e.clientX;
@@ -124,7 +222,6 @@ export default function JourneyPage() {
     setDragX(0);
   }
 
-  // swipe: enquanto arrasta
   function onPointerMove(e: React.PointerEvent) {
     if (startX.current === null || isAnimating) return;
     const dx = e.clientX - startX.current;
@@ -132,7 +229,6 @@ export default function JourneyPage() {
     setDragX(dx);
   }
 
-  // swipe: quando solta
   function onPointerUp() {
     if (startX.current === null || isAnimating) return;
 
@@ -168,21 +264,9 @@ export default function JourneyPage() {
     deltaX.current = 0;
   }
 
-  // teclas (desktop / teste)
-  useEffect(() => {
-    function onKeyDown(ev: KeyboardEvent) {
-      if (ev.key === "ArrowLeft") goPrev();
-      if (ev.key === "ArrowRight") goNext();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <AccessGuard>
       <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Topo */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <Link href="/library" style={{ textDecoration: "none", fontSize: 13 }}>
             ← Biblioteca
@@ -195,7 +279,6 @@ export default function JourneyPage() {
           <div style={{ width: 72 }} />
         </div>
 
-        {/* Tela da estação */}
         <div
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -216,13 +299,23 @@ export default function JourneyPage() {
             text={current.text}
             images={current.images}
             playerState={playerState}
-            onPlay={() => setPlaySignal((n) => n + 1)}
-            onPause={() => setPauseSignal((n) => n + 1)}
-            onSeek={(t: number) => setSeekTo(t)}
+            onPlay={() => {
+              safeSet(KEY_PLAYING, "true");
+              saveSnapshot();
+              setPlaySignal((n) => n + 1);
+            }}
+            onPause={() => {
+              safeSet(KEY_PLAYING, "false");
+              saveSnapshot();
+              setPauseSignal((n) => n + 1);
+            }}
+            onSeek={(t: number) => {
+              setSeekTo(t);
+              window.setTimeout(() => saveSnapshot(), 120);
+            }}
           />
         </div>
 
-        {/* Botões */}
         <div style={{ display: "flex", gap: 12 }}>
           <button
             onClick={goPrev}
@@ -255,10 +348,6 @@ export default function JourneyPage() {
           </button>
         </div>
 
-        <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.3, textAlign: "center" }}>
-          Dica: arraste para a esquerda/direita como um story.
-        </div>
-
         <AudioEngine
           track={track}
           onTimeUpdate={setPlayerState}
@@ -283,11 +372,7 @@ function StationView({
   title: string;
   text: string;
   images: string[];
-  playerState: {
-    currentTime: number;
-    duration: number;
-    paused: boolean;
-  };
+  playerState: { currentTime: number; duration: number; paused: boolean };
   onPlay: () => void;
   onPause: () => void;
   onSeek: (t: number) => void;
@@ -302,7 +387,6 @@ function StationView({
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
-
       <AutoGallery images={images} seconds={3.5} />
 
       <div style={{ borderRadius: 16, border: "1px solid rgba(0,0,0,0.15)", padding: 12 }}>
@@ -425,23 +509,6 @@ function AutoGallery({ images, seconds }: { images: string[]; seconds: number })
               }}
             />
           ))}
-        </div>
-      )}
-
-      {total > 1 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            fontSize: 12,
-            padding: "4px 8px",
-            borderRadius: 999,
-            background: "rgba(0,0,0,0.45)",
-            color: "white",
-          }}
-        >
-          {i + 1}/{total}
         </div>
       )}
     </div>
