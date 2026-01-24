@@ -1,3 +1,5 @@
+import SplashGate from "./components/SplashGate";
+
 export default function RootLayout({
   children,
 }: {
@@ -21,7 +23,7 @@ export default function RootLayout({
             background: "white",
           }}
         >
-          {children}
+          <SplashGate seconds={3}>{children}</SplashGate>
         </div>
       </body>
     </html>
