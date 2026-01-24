@@ -28,7 +28,6 @@ export default function SplashGate({
 
       return () => window.clearTimeout(timer);
     } catch {
-      // Se sessionStorage falhar, não bloqueia o app
       return;
     }
   }, [seconds]);
@@ -53,8 +52,9 @@ export default function SplashGate({
         src="/splash.png"
         alt="Jornada"
         style={{
-          width: "85%",
-          maxWidth: 420,
+          maxHeight: "70vh",
+          maxWidth: "90vw",
+          width: "auto",
           height: "auto",
         }}
       />
