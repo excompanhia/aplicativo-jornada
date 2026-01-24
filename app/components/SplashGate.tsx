@@ -14,27 +14,28 @@ export default function SplashGate({
   const [showSplash, setShowSplash] = useState(false);
 
   useEffect(() => {
-    // Regra: splash só aparece 1x por “sessão” (até fechar e abrir de novo)
     try {
-      const already = window.sessionStorage.getItem(KEY);
-      if (already === "true") return;
+      // Splash aparece apenas 1x por sessão (até fechar e abrir o app)
+      const alreadyShown = window.sessionStorage.getItem(KEY);
+      if (alreadyShown === "true") return;
 
-      // primeira vez nesta sessão: mostra splash
       window.sessionStorage.setItem(KEY, "true");
       setShowSplash(true);
 
-      const t = window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
         setShowSplash(false);
       }, Math.max(0, seconds) * 1000);
 
-      return () => window.clearTimeout(t);
+      return () => window.clearTimeout(timer);
     } catch {
-      // Se sessionStorage falhar por algum motivo, não trava o app.
+      // Se sessionStorage falhar, não bloqueia o app
       return;
     }
   }, [seconds]);
 
-  if (!showSplash) return <>{children}</>;
+  if (!showSplash) {
+    return <>{children}</>;
+  }
 
   return (
     <div
@@ -48,11 +49,15 @@ export default function SplashGate({
         zIndex: 999999,
       }}
     >
-      {/* Substitua por logo/imagem/animação depois */}
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: 0.3 }}>JORNADA</div>
-        <div style={{ marginTop: 10, fontSize: 13, opacity: 0.65 }}>abrindo…</div>
-      </div>
+      <img
+        src="/splash.png"
+        alt="Jornada"
+        style={{
+          width: "70%",
+          maxWidth: 320,
+          height: "auto",
+        }}
+      />
     </div>
   );
 }
