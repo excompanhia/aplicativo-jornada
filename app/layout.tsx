@@ -3,8 +3,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Mostra splash por 3s apenas 1x por “sessão” (até fechar e abrir o app).
-  // Faz isso ANTES do React, evitando a piscada de landing.
+  // Script roda NO FIM do body, então os elementos já existem.
   const inlineScript = `
 (function () {
   try {
@@ -12,16 +11,21 @@ export default function RootLayout({
     var already = sessionStorage.getItem(KEY);
     var shouldShow = (already !== "true");
 
-    if (!shouldShow) return;
-
-    sessionStorage.setItem(KEY, "true");
-
     var splash = document.getElementById("jornada-splash");
     var app = document.getElementById("jornada-app");
 
     if (!splash || !app) return;
 
-    // mostra splash imediatamente e esconde o app
+    if (!shouldShow) {
+      // não precisa splash -> garante app visível
+      splash.style.display = "none";
+      app.style.visibility = "visible";
+      return;
+    }
+
+    sessionStorage.setItem(KEY, "true");
+
+    // mostra splash e esconde app imediatamente
     splash.style.display = "flex";
     app.style.visibility = "hidden";
 
@@ -38,10 +42,6 @@ export default function RootLayout({
 
   return (
     <html lang="pt-BR">
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: inlineScript }} />
-      </head>
-
       <body
         style={{
           margin: 0,
@@ -50,14 +50,14 @@ export default function RootLayout({
           justifyContent: "center",
         }}
       >
-        {/* Splash server-rendered (sem flash) */}
+        {/* Splash (fica off por padrão; script liga quando precisa) */}
         <div
           id="jornada-splash"
           style={{
             position: "fixed",
             inset: 0,
             background: "white",
-            display: "none", // o script liga quando precisa
+            display: "none",
             alignItems: "center",
             justifyContent: "center",
             zIndex: 999999,
@@ -83,10 +83,15 @@ export default function RootLayout({
             maxWidth: 430,
             minHeight: "100vh",
             background: "white",
+            // começa visível por padrão; o script pode esconder por 3s
+            visibility: "visible",
           }}
         >
           {children}
         </div>
+
+        {/* Script no fim do body (sem falhar) */}
+        <script dangerouslySetInnerHTML={{ __html: inlineScript }} />
       </body>
     </html>
   );
