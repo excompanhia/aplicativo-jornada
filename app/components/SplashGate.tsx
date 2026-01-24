@@ -53,8 +53,8 @@ export default function SplashGate({
         src="/splash.png"
         alt="Jornada"
         style={{
-          width: "70%",
-          maxWidth: 320,
+          width: "85%",
+          maxWidth: 420,
           height: "auto",
         }}
       />
