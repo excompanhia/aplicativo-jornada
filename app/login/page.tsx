@@ -81,6 +81,22 @@ function LoginInner() {
       return;
     }
 
+    // ✅ NOVO: registrar esse login no mailing (server-side)
+    // Observação: não bloqueia a navegação se falhar.
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      if (token) {
+        fetch("/api/mailing/login", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
     const destino = plano ? "/checkout?plano=" + plano : "/checkout";
     router.push(destino);
   }
@@ -235,4 +251,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-
