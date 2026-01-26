@@ -13,7 +13,12 @@ function getSupabaseClient() {
 
 function CheckoutInner() {
   const searchParams = useSearchParams();
+
+  // plano escolhido
   const plano = searchParams.get("plano"); // "1h" | "2h" | "day"
+
+  // ✅ NOVO: experience_id vindo da URL
+  const exp = searchParams.get("exp"); // experience_id (string)
 
   const [isPaying, setIsPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,16 +65,22 @@ function CheckoutInner() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ plan: plano }),
+        body: JSON.stringify({
+          plan: plano,
+          experience_id: exp, // ✅ NOVO
+        }),
       });
 
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-      const msg =
-    (json?.error ? String(json.error) : "Erro ao criar checkout.") +
-    (json?.details ? "\n\nDETAILS:\n" + JSON.stringify(json.details, null, 2) : "");
-  setError(msg);
+        const msg =
+          (json?.error ? String(json.error) : "Erro ao criar checkout.") +
+          (json?.details
+            ? "\n\nDETAILS:\n" +
+              JSON.stringify(json.details, null, 2)
+            : "");
+        setError(msg);
         return;
       }
 
@@ -80,7 +91,7 @@ function CheckoutInner() {
 
       // 3) Abre o Mercado Pago
       window.open(json.checkoutUrl, "_blank", "noopener,noreferrer");
-window.location.href = "/payment/pending";
+      window.location.href = "/payment/pending";
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
     } finally {
@@ -89,12 +100,29 @@ window.location.href = "/payment/pending";
   }
 
   return (
-    <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+    <main
+      style={{
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
       <h1>Checkout</h1>
 
-      <div style={{ border: "1px solid rgba(0,0,0,0.15)", borderRadius: 16, padding: 16 }}>
-        <div style={{ fontSize: 13, opacity: 0.7 }}>Plano selecionado</div>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>{planoTexto}</div>
+      <div
+        style={{
+          border: "1px solid rgba(0,0,0,0.15)",
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <div style={{ fontSize: 13, opacity: 0.7 }}>
+          Plano selecionado
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>
+          {planoTexto}
+        </div>
       </div>
 
       <button
@@ -118,7 +146,10 @@ window.location.href = "/payment/pending";
         </div>
       )}
 
-      <Link href="/" style={{ textDecoration: "none", textAlign: "center" }}>
+      <Link
+        href="/"
+        style={{ textDecoration: "none", textAlign: "center" }}
+      >
         Voltar para a landing
       </Link>
     </main>
@@ -127,7 +158,13 @@ window.location.href = "/payment/pending";
 
 export default function CheckoutPage() {
   return (
-    <Suspense fallback={<main style={{ padding: 16 }}>Carregando checkout…</main>}>
+    <Suspense
+      fallback={
+        <main style={{ padding: 16 }}>
+          Carregando checkout…
+        </main>
+      }
+    >
       <CheckoutInner />
     </Suspense>
   );
