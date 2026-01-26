@@ -1,27 +1,64 @@
-import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import { getSupabaseServer } from "@/app/lib/supabaseServer";
+"use client";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
 const ADMIN_EMAIL = "contato@excompanhia.com";
 
-export default async function AdminPage() {
-  headers();
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const supabase = await getSupabaseServer();
-  const { data, error } = await supabase.auth.getUser();
+export default function AdminPage() {
+  const router = useRouter();
+  const [status, setStatus] = useState<
+    "checking" | "not_logged" | "not_admin" | "ok"
+  >("checking");
+  const [email, setEmail] = useState("");
 
-  // Se não estiver logado, manda para login do ADMIN (separado do Journey)
-  if (error || !data?.user) {
-    redirect("/admin/login");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (cancelled) return;
+
+      if (error || !data?.user) {
+        setStatus("not_logged");
+        router.replace("/admin/login");
+        return;
+      }
+
+      const e = (data.user.email || "").toLowerCase();
+      setEmail(e);
+
+      if (e !== ADMIN_EMAIL) {
+        setStatus("not_admin");
+        return;
+      }
+
+      setStatus("ok");
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (status === "checking") {
+    return (
+      <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+        <h1 style={{ fontSize: 24, marginBottom: 12 }}>Admin</h1>
+        <p style={{ opacity: 0.7 }}>Verificando login…</p>
+      </main>
+    );
   }
 
-  const email = (data.user.email || "").toLowerCase();
-
-  // Se estiver logado mas não for o admin
-  if (email !== ADMIN_EMAIL) {
+  if (status === "not_admin") {
     return (
       <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
         <h1 style={{ fontSize: 24, marginBottom: 12 }}>Sem acesso</h1>
@@ -33,14 +70,14 @@ export default async function AdminPage() {
     );
   }
 
-  // Admin OK
+  // status === "ok"
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>Admin (read-only)</h1>
       <p style={{ marginBottom: 8 }}>
         Bem-vindo, {email}. Este painel é leitura apenas.
       </p>
-      <p style={{ opacity: 0.7 }}>VERSÃO ADMIN: 2026-01-26_FINAL</p>
+      <p style={{ opacity: 0.7 }}>VERSÃO ADMIN: 2026-01-26_CLIENT_OK</p>
     </main>
   );
 }
