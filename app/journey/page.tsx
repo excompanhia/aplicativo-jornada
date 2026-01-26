@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { stations } from "../lib/stations";
 import { collectStationAssets } from "@/app/lib/preloadStations";
@@ -20,6 +20,13 @@ const KEY_INDEX = "jornada:journey:index";
 const KEY_PLAYING = "jornada:journey:playing";
 const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
 
+// ✅ BLOCO 3: polimento preload (UI simples)
+type PreloadUiState =
+  | { status: "idle" }
+  | { status: "running"; done: number; total: number; lastUrl?: string }
+  | { status: "done"; total: number }
+  | { status: "error"; message: string };
+
 export default function JourneyPage() {
   const [index, setIndex] = useState(0);
   const current = stations[index];
@@ -29,6 +36,9 @@ export default function JourneyPage() {
   const deltaX = useRef<number>(0);
   const [dragX, setDragX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
+
+  // ✅ BLOCO 3: UI do preload
+  const [preloadUi, setPreloadUi] = useState<PreloadUiState>({ status: "idle" });
 
   // player state
   const [playerState, setPlayerState] = useState<{
@@ -174,38 +184,69 @@ export default function JourneyPage() {
   }, []);
 
   // =========================
-  // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA)
+  // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA) + UI (BLOCO 3)
   // =========================
   const preloadStartedRef = useRef(false);
   useEffect(() => {
     if (preloadStartedRef.current) return;
     preloadStartedRef.current = true;
 
-    const urls = collectStationAssets(stations);
+    (async () => {
+      try {
+        const urls = collectStationAssets(stations);
 
-    // garante que a "memória" corresponde ao conjunto atual
-    const { cleared } = ensureManifestForUrls(urls);
-    if (cleared) {
-      console.log("Preload manifest resetado (mudança de assets)");
-    }
+        // garante que a "memória" corresponde ao conjunto atual
+        ensureManifestForUrls(urls);
 
-    // só baixa o que ainda não temos
-    const missing = filterMissingUrls(urls);
+        // só baixa o que ainda não temos
+        const missing = filterMissingUrls(urls);
 
-    if (missing.length === 0) {
-      console.log("Todos os assets já estão disponíveis offline");
-      return;
-    }
+        if (missing.length === 0) {
+          // já está tudo offline
+          setPreloadUi({ status: "done", total: 0 });
+          // some rápido (fica invisível pro usuário)
+          window.setTimeout(() => setPreloadUi({ status: "idle" }), 800);
+          return;
+        }
 
-    preloadAssets(missing, {
-      delayMs: 300,
-      onProgress: (currentNum, total, url) => {
-        console.log(`Offline preload ${currentNum}/${total}`, url);
-      },
-      onResult: (url, ok) => {
-        if (ok) markUrlOk(url);
-      },
-    });
+        // inicia UI
+        setPreloadUi({ status: "running", done: 0, total: missing.length });
+
+        let done = 0;
+
+        await preloadAssets(missing, {
+          delayMs: 300,
+          onProgress: (currentNum, total, url) => {
+            // currentNum já é 1..total
+            done = currentNum;
+
+            setPreloadUi({
+              status: "running",
+              done: currentNum,
+              total,
+              lastUrl: url,
+            });
+          },
+          onResult: (url, ok) => {
+            if (ok) markUrlOk(url);
+          },
+        });
+
+        // terminou
+        setPreloadUi({ status: "done", total: missing.length });
+
+        // some sozinho (UX limpa)
+        window.setTimeout(() => setPreloadUi({ status: "idle" }), 2000);
+      } catch (err: any) {
+        setPreloadUi({
+          status: "error",
+          message: err?.message ? String(err.message) : "Erro no preload offline",
+        });
+
+        // some depois (não fica gritando)
+        window.setTimeout(() => setPreloadUi({ status: "idle" }), 2500);
+      }
+    })();
   }, []);
 
   // track atual
@@ -301,6 +342,11 @@ export default function JourneyPage() {
           <div style={{ width: 72 }} />
         </div>
 
+        {/* ✅ BLOCO 3: feedback visual do preload (discreto) */}
+        {preloadUi.status !== "idle" && (
+          <PreloadBanner state={preloadUi} />
+        )}
+
         <div
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -379,6 +425,43 @@ export default function JourneyPage() {
         />
       </main>
     </AccessGuard>
+  );
+}
+
+function PreloadBanner({ state }: { state: PreloadUiState }) {
+  let text = "";
+  if (state.status === "running") {
+    text = `Preparando offline ${state.done}/${state.total}`;
+  } else if (state.status === "done") {
+    text = state.total > 0 ? "Offline pronto ✓" : "Offline já estava pronto ✓";
+  } else if (state.status === "error") {
+    text = "Preload offline falhou (seguindo mesmo assim)";
+  } else {
+    return null;
+  }
+
+  return (
+    <div
+      style={{
+        borderRadius: 14,
+        border: "1px solid rgba(0,0,0,0.12)",
+        background: "rgba(0,0,0,0.03)",
+        padding: "10px 12px",
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 10,
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{text}</div>
+
+      {state.status === "running" && (
+        <div style={{ opacity: 0.7, fontSize: 12 }}>
+          preparando uso offline…
+        </div>
+      )}
+    </div>
   );
 }
 
