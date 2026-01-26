@@ -70,18 +70,36 @@ export default function AdminPage() {
       }
 
       try {
-        const res = await fetch("/api/admin/passes", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+       const res = await fetch("/api/admin/passes", {
+  method: "GET",
+  headers: { Authorization: `Bearer ${token}` },
+  cache: "no-store",
+});
 
-        const json = await res.json();
+const ct = res.headers.get("content-type") || "";
 
-        if (!res.ok || !json?.ok) {
-          setPassesError(json?.error || "Erro ao carregar passes.");
-          setPasses([]);
-        } else {
-          setPasses(json.passes || []);
-        }
+if (!ct.includes("application/json")) {
+  const text = await res.text();
+  setPassesError(
+    `API não retornou JSON (status ${res.status}). content-type: ${ct}. Primeiros caracteres: ${text.slice(
+      0,
+      120
+    )}`
+  );
+  setPasses([]);
+  return;
+}
+
+const json = await res.json();
+
+if (!res.ok || !json?.ok) {
+  setPassesError(
+    `Erro da API (status ${res.status}): ${json?.error || "desconhecido"}`
+  );
+  setPasses([]);
+} else {
+  setPasses(json.passes || []);
+}
       } catch (err: any) {
         setPassesError(err?.message || "Falha de rede ao carregar passes.");
         setPasses([]);
