@@ -8,15 +8,14 @@ export const revalidate = 0;
 const ADMIN_EMAIL = "contato@excompanhia.com";
 
 export default async function AdminPage() {
-  // força a rota a ser 100% dinâmica por request
   headers();
 
   const supabase = await getSupabaseServer();
   const { data, error } = await supabase.auth.getUser();
 
-  // Se não estiver logado, manda para login
+  // Se não estiver logado, manda para login do ADMIN (separado do Journey)
   if (error || !data?.user) {
-    redirect("/login");
+    redirect("/admin/login");
   }
 
   const email = (data.user.email || "").toLowerCase();
@@ -41,9 +40,7 @@ export default async function AdminPage() {
       <p style={{ marginBottom: 8 }}>
         Bem-vindo, {email}. Este painel é leitura apenas.
       </p>
-      <p style={{ opacity: 0.7 }}>
-        VERSÃO ADMIN: 2026-01-26_FINAL
-      </p>
+      <p style={{ opacity: 0.7 }}>VERSÃO ADMIN: 2026-01-26_FINAL</p>
     </main>
   );
 }
