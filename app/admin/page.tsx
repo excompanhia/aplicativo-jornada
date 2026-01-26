@@ -66,6 +66,20 @@ export default function AdminPage() {
           Esta área é restrita ao administrador.
         </p>
         <p style={{ opacity: 0.7 }}>Usuário logado: {email || "(sem e-mail)"}</p>
+
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            window.location.href = "/admin/login";
+          }}
+          style={{
+            marginTop: 16,
+            padding: 10,
+            cursor: "pointer",
+          }}
+        >
+          Sair
+        </button>
       </main>
     );
   }
@@ -74,10 +88,27 @@ export default function AdminPage() {
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>Admin (read-only)</h1>
+
       <p style={{ marginBottom: 8 }}>
         Bem-vindo, {email}. Este painel é leitura apenas.
       </p>
-      <p style={{ opacity: 0.7 }}>VERSÃO ADMIN: 2026-01-26_CLIENT_OK</p>
+
+      <p style={{ opacity: 0.7, marginBottom: 12 }}>
+        VERSÃO ADMIN: 2026-01-26_CLIENT_OK
+      </p>
+
+      <button
+        onClick={async () => {
+          await supabase.auth.signOut();
+          window.location.href = "/admin/login";
+        }}
+        style={{
+          padding: 10,
+          cursor: "pointer",
+        }}
+      >
+        Sair do Admin
+      </button>
     </main>
   );
 }
