@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSupabaseServer } from "@/app/lib/supabaseServer";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const ADMIN_EMAIL = "contato@excompanhia.com";
 
@@ -32,6 +34,7 @@ export default async function AdminPage() {
   return (
     <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 24, marginBottom: 12 }}>Admin (read-only)</h1>
+      <p style={{ opacity: 0.7 }}>VERSÃO ADMIN: 2026-01-26_11h20</p>
       <p style={{ marginBottom: 8 }}>
         Bem-vindo, {email}. Este painel é leitura apenas.
       </p>
