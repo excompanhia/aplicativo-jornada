@@ -1,19 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createClient(url, serviceRole, { auth: { persistSession: false } });
-}
+import { getSupabaseAdmin } from "@/app/lib/supabaseAdmin";
 
 function addSeconds(baseIso: string, seconds: number) {
   const base = new Date(baseIso).getTime();
   return new Date(base + seconds * 1000).toISOString();
-}
-
-function maxIso(aIso: string, bIso: string) {
-  return new Date(aIso).getTime() >= new Date(bIso).getTime() ? aIso : bIso;
 }
 
 export async function POST(req: Request) {
@@ -21,350 +12,118 @@ export async function POST(req: Request) {
     const mpAccessToken = process.env.MP_ACCESS_TOKEN;
     if (!mpAccessToken) {
       return NextResponse.json(
-        { ok: false, error: "MP_ACCESS_TOKEN ausente" },
+        { ok: false, error: "MP_ACCESS_TOKEN missing" },
         { status: 500 }
       );
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRole) {
-      return NextResponse.json(
-        { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY ausente" },
-        { status: 500 }
-      );
-    }
+    const body = await req.json();
 
-    const body = await req.json().catch(() => ({} as any));
-
-    // Mercado Pago pode mandar id em lugares diferentes
-    const url = new URL(req.url);
-    const idFromQuery =
-      url.searchParams.get("data.id") ||
-      url.searchParams.get("id") ||
-      url.searchParams.get("payment_id");
-
-    const paymentId =
-      body?.data?.id ||
-      body?.data?.object?.id ||
-      body?.id ||
-      body?.payment_id ||
-      idFromQuery;
-
-    // Sem paymentId: ignora, mas responde 200
+    const paymentId = body?.data?.id;
     if (!paymentId) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "Evento sem paymentId (ignorado)",
-      });
+      return NextResponse.json(
+        { ok: false, error: "payment id missing" },
+        { status: 400 }
+      );
     }
 
-    // Busca o pagamento real no MP (fonte da verdade)
-    const payRes = await fetch(
+    const res = await fetch(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
       {
-        method: "GET",
         headers: {
           Authorization: `Bearer ${mpAccessToken}`,
-          "Content-Type": "application/json",
         },
       }
     );
 
-    const payment = await payRes.json().catch(() => null);
-
-    // Se não achou payment, não falha “fatal” (timing do MP)
-    if (!payRes.ok || !payment?.id) {
-      return NextResponse.json({
-        ok: true,
-        ignored: true,
-        reason: "Payment ainda não disponível / não encontrado",
-        mp_status: payRes.status,
-        details: payment,
-      });
-    }
-
-    const status: string = payment.status; // approved | pending | rejected | cancelled...
-    const mpPaymentId = String(payment.id);
-
-    const metadata = payment.metadata || {};
-    const externalReference: string | undefined = payment.external_reference;
-
-    // ✅ Renovação (vinda do checkout)
-    const isRenewal: boolean = Boolean(metadata.is_renewal);
-
-    // Dados da preference
-    let userId: string | undefined = metadata.user_id;
-
-    let seconds: number | undefined =
-      typeof metadata.seconds === "number" ? metadata.seconds : undefined;
-
-    if (!seconds && typeof metadata.seconds === "string") {
-      const n = Number(metadata.seconds);
-      if (Number.isFinite(n)) seconds = n;
-    }
-
-    // Fallback: jornada:${userId}:${...}
-    if (!userId && typeof externalReference === "string") {
-      const parts = externalReference.split(":");
-      if (parts.length >= 2 && parts[0] === "jornada") {
-        userId = parts[1];
-      }
-    }
-
-    const supabase = getSupabaseAdmin();
-
-    // 1) Idempotência: se já existe passe com esse payment_id, não cria de novo
-    const { data: existing, error: existErr } = await supabase
-      .from("passes")
-      .select("id, status, expires_at")
-      .eq("payment_id", mpPaymentId)
-      .maybeSingle();
-
-    if (existErr) {
+    if (!res.ok) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Erro ao checar passe existente",
-          details: existErr.message,
-        },
+        { ok: false, error: "failed to fetch payment" },
         { status: 500 }
       );
     }
 
-    if (existing?.id) {
-      return NextResponse.json({
-        ok: true,
-        status,
-        alreadyProcessed: true,
-        pass_id: existing.id,
-        pass_status: existing.status,
-        expires_at: existing.expires_at,
-      });
+    const payment = await res.json();
+
+    if (payment.status !== "approved") {
+      return NextResponse.json({ ok: true, ignored: true });
     }
 
-    // 2) Se não approved, não cria passe (mas retorna 200 com status)
-    if (status !== "approved") {
-      return NextResponse.json({ ok: true, status, createdPass: false });
-    }
+    const metadata = payment.metadata || {};
+    const userId = metadata.user_id;
+    const durationMinutes = Number(metadata.duration_minutes);
+    const isRenewal: boolean = Boolean(metadata.is_renewal);
 
-    // 3) approved → precisa do userId + seconds
-    if (!userId || !seconds) {
+    if (!userId || !durationMinutes) {
       return NextResponse.json(
-        {
-          ok: true,
-          status,
-          createdPass: false,
-          ignored: true,
-          reason: "approved mas faltam dados (user_id/seconds) na metadata",
-        },
-        { status: 200 }
+        { ok: false, error: "metadata incomplete" },
+        { status: 400 }
       );
     }
 
-    // Momento da compra (melhor usar o que o MP informa)
-    const purchasedAt: string =
-      payment.date_approved || payment.date_created || new Date().toISOString();
+    const supabase = getSupabaseAdmin();
 
-    const durationMinutes = Math.round(seconds / 60);
-
-    // =========================
-    // ✅ RENOVAÇÃO: SOMA TEMPO
-    // =========================
     if (isRenewal) {
-      // Pega o passe ativo atual do usuário (se houver)
-      const { data: activePass, error: activeErr } = await supabase
+      const { data: activePass } = await supabase
         .from("passes")
-        .select("id, expires_at, status")
+        .select("*")
         .eq("user_id", userId)
         .eq("status", "active")
         .order("expires_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (activeErr) {
+      if (!activePass) {
         return NextResponse.json(
-          {
-            ok: false,
-            error: "Erro ao buscar passe ativo para renovação",
-            details: activeErr.message,
-          },
-          { status: 500 }
+          { ok: false, error: "no active pass to renew" },
+          { status: 400 }
         );
       }
 
-      // Base: se tiver passe ativo, soma em cima do expires_at dele (ou agora, se já passou)
-      const nowIso = new Date().toISOString();
+      const baseIso =
+        new Date(activePass.expires_at).getTime() > Date.now()
+          ? activePass.expires_at
+          : new Date().toISOString();
 
-      const baseIso = activePass?.expires_at
-        ? maxIso(activePass.expires_at, nowIso)
-        : maxIso(purchasedAt, nowIso);
+      const newExpiresAt = addSeconds(
+        baseIso,
+        durationMinutes * 60
+      );
 
-      const newExpiresAt = addSeconds(baseIso, seconds);
-
-      if (activePass?.id) {
-        // Atualiza o passe ativo existente: soma tempo + marca active + registra payment
-        const { data: updated, error: updErr } = await supabase
-          .from("passes")
-          .update({
-            status: "active",
-            expires_at: newExpiresAt,
-            // registra o último pagamento associado (mantém rastreabilidade)
-            payment_provider: "mercadopago",
-            payment_id: mpPaymentId,
-            // opcional: manter duration_minutes como “última renovação”
-            duration_minutes: durationMinutes,
-            purchased_at: purchasedAt,
-          })
-          .eq("id", activePass.id)
-          .select("id, status, expires_at")
-          .single();
-
-        if (updErr || !updated?.id) {
-          return NextResponse.json(
-            {
-              ok: false,
-              error: "Falha ao atualizar passe na renovação",
-              details: updErr?.message || "update sem id",
-            },
-            { status: 500 }
-          );
-        }
-
-        return NextResponse.json({
-          ok: true,
-          status,
-          createdPass: false,
-          renewed: true,
-          pass_id: updated.id,
-          pass_status: updated.status,
-          expires_at: updated.expires_at,
-        });
-      }
-
-      // Se não existia passe ativo (caso raro), cria um novo (e não precisa expirar outros)
-      const expiresAt = addSeconds(purchasedAt, seconds);
-
-      const passInsert = {
-        user_id: userId,
-        status: "active",
-        duration_minutes: durationMinutes,
-        purchased_at: purchasedAt,
-        expires_at: expiresAt,
-        payment_provider: "mercadopago",
-        payment_id: mpPaymentId,
-      };
-
-      const { data: inserted, error: insertErr } = await supabase
+      await supabase
         .from("passes")
-        .insert(passInsert)
-        .select("id")
-        .single();
+        .update({ expires_at: newExpiresAt })
+        .eq("id", activePass.id);
 
-      if (insertErr || !inserted?.id) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Falha ao criar passe (renovação sem ativo)",
-            details: insertErr?.message || "insert sem id",
-          },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({
-        ok: true,
-        status,
-        createdPass: true,
-        renewed: true,
-        pass_id: inserted.id,
-        pass_status: "active",
-        expires_at: expiresAt,
-      });
+      return NextResponse.json({ ok: true, renewed: true });
     }
 
-    // =========================
-    // COMPRA NORMAL (como era)
-    // =========================
-    const expiresAt = addSeconds(purchasedAt, seconds);
+    await supabase
+      .from("passes")
+      .update({ status: "expired" })
+      .eq("user_id", userId)
+      .eq("status", "active");
 
-    // ✅ Importante:
-    // Mesmo que a gente insira "active", alguns setups no banco podem sobrescrever no INSERT.
-    // Por isso vamos:
-    // 1) inserir
-    // 2) forçar UPDATE do novo id para status="active"
-    // 3) expirar os outros (excluindo o novo id)
-    const passInsert = {
+    const purchasedAt = new Date().toISOString();
+    const expiresAt = addSeconds(
+      purchasedAt,
+      durationMinutes * 60
+    );
+
+    await supabase.from("passes").insert({
       user_id: userId,
       status: "active",
       duration_minutes: durationMinutes,
       purchased_at: purchasedAt,
       expires_at: expiresAt,
       payment_provider: "mercadopago",
-      payment_id: mpPaymentId,
-    };
-
-    // 4) Cria o passe novo
-    const { data: inserted, error: insertErr } = await supabase
-      .from("passes")
-      .insert(passInsert)
-      .select("id")
-      .single();
-
-    if (insertErr || !inserted?.id) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Falha ao criar passe",
-          details: insertErr?.message || "insert sem id",
-        },
-        { status: 500 }
-      );
-    }
-
-    const newPassId = inserted.id as string;
-
-    // ✅ 5) Força o status "active" no passe recém-criado (ganha de defaults/triggers de INSERT)
-    const { data: fixed, error: fixErr } = await supabase
-      .from("passes")
-      .update({ status: "active" })
-      .eq("id", newPassId)
-      .select("id, status, expires_at")
-      .single();
-
-    if (fixErr) {
-      // Não derruba o webhook; mas reporta para debug
-      console.error("Erro ao forçar status active no novo passe:", fixErr);
-    }
-
-    // 🔒 6) Regra: apenas 1 passe ativo por usuário
-    // Expira qualquer outro passe ativo anterior (exclui o passe novo)
-    const { error: expireErr } = await supabase
-      .from("passes")
-      .update({ status: "expired" })
-      .eq("user_id", userId)
-      .eq("status", "active")
-      .neq("id", newPassId);
-
-    if (expireErr) {
-      console.error("Erro ao expirar passes antigos:", expireErr);
-    }
-
-    return NextResponse.json({
-      ok: true,
-      status,
-      createdPass: true,
-      pass_id: newPassId,
-      pass_status: fixed?.status || "active",
-      expires_at: fixed?.expires_at || expiresAt,
+      payment_id: String(paymentId),
     });
+
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: "Erro inesperado no webhook",
-        details: String(err?.message || err),
-      },
+      { ok: false, error: err.message },
       { status: 500 }
     );
   }
