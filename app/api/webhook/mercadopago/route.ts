@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/app/lib/supabaseAdmin";
 
 function addSeconds(baseIso: string, seconds: number) {
@@ -62,7 +61,69 @@ export async function POST(req: Request) {
     }
 
     const supabase = getSupabaseAdmin();
+    const nowIso = new Date().toISOString();
 
+    // ✅ NOVO: atualizar mailing_contacts quando uma compra é aprovada
+    // (vale para compra normal e renovação)
+    try {
+      // 1) Buscar email do usuário no Auth (admin)
+      const { data: userData, error: userErr } =
+        await supabase.auth.admin.getUserById(String(userId));
+
+      const email = userData?.user?.email ?? null;
+
+      // 2) Ler estado atual no mailing (se existir)
+      const { data: existing, error: existingErr } = await supabase
+        .from("mailing_contacts")
+        .select(
+          "user_id, email, first_login_at, first_purchase_at, last_purchase_at, purchases_count"
+        )
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (existingErr) {
+        console.error("mailing_contacts read failed:", existingErr.message);
+      } else {
+        if (!existing) {
+          // ✅ CORREÇÃO AQUI: parênteses para não misturar ?? com || sem agrupar
+          const emailToSave =
+            (email ?? String(metadata.email ?? "").trim()) || "unknown";
+
+          // Se nunca registrou login, criamos mesmo assim (não perdemos histórico)
+          await supabase.from("mailing_contacts").insert({
+            user_id: userId,
+            email: emailToSave,
+            first_login_at: nowIso, // fallback se não houver login registrado
+            first_purchase_at: nowIso,
+            last_purchase_at: nowIso,
+            purchases_count: 1,
+            source: "mercadopago_webhook",
+            created_at: nowIso,
+          });
+        } else {
+          const nextCount = (existing.purchases_count ?? 0) + 1;
+
+          await supabase
+            .from("mailing_contacts")
+            .update({
+              email: email ?? existing.email,
+              purchases_count: nextCount,
+              first_purchase_at: existing.first_purchase_at ?? nowIso,
+              last_purchase_at: nowIso,
+              source: "mercadopago_webhook",
+            })
+            .eq("user_id", userId);
+        }
+      }
+
+      if (userErr) {
+        console.error("auth admin getUserById failed:", userErr.message);
+      }
+    } catch (e: any) {
+      console.error("mailing_contacts update unexpected error:", e?.message ?? e);
+    }
+
+    // --- lógica atual de passes (mantida) ---
     if (isRenewal) {
       const { data: activePass } = await supabase
         .from("passes")
@@ -85,10 +146,7 @@ export async function POST(req: Request) {
           ? activePass.expires_at
           : new Date().toISOString();
 
-      const newExpiresAt = addSeconds(
-        baseIso,
-        durationMinutes * 60
-      );
+      const newExpiresAt = addSeconds(baseIso, durationMinutes * 60);
 
       await supabase
         .from("passes")
@@ -105,10 +163,7 @@ export async function POST(req: Request) {
       .eq("status", "active");
 
     const purchasedAt = new Date().toISOString();
-    const expiresAt = addSeconds(
-      purchasedAt,
-      durationMinutes * 60
-    );
+    const expiresAt = addSeconds(purchasedAt, durationMinutes * 60);
 
     await supabase.from("passes").insert({
       user_id: userId,
