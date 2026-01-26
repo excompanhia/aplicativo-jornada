@@ -1,253 +1,185 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import { supabase } from "../lib/supabaseClient";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+import { useRouter } from "next/navigation";
 
-function LoginInner() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-  const plano = searchParams.get("plano");
+function readTrackingFromUrl() {
+  const params = new URLSearchParams(window.location.search);
 
-  const planoTexto = useMemo(() => {
-    if (plano === "1h") return "1 hora — R$ 14,90";
-    if (plano === "2h") return "2 horas — R$ 19,90";
-    if (plano === "day") return "Dia todo (24h) — R$ 29,90";
-    return null;
-  }, [plano]);
+  const experience_id =
+    (params.get("exp") ||
+      params.get("experience_id") ||
+      params.get("experience") ||
+      "default").trim();
 
-  const [email, setEmail] = useState("");
-  const [enviado, setEnviado] = useState(false);
-  const [aguarde, setAguarde] = useState(0);
-  const [erro, setErro] = useState<string | null>(null);
-  const [codigo, setCodigo] = useState("");
-  const [confirmando, setConfirmando] = useState(false);
+  const qr_point_id =
+    (params.get("qr") ||
+      params.get("qr_point_id") ||
+      params.get("point") ||
+      "").trim();
 
-  async function enviarLinkOuCodigo() {
-    setErro(null);
-
-    if (!email.includes("@")) {
-      alert("Digite um e-mail válido (exemplo: nome@site.com).");
-      return;
-    }
-
-    if (aguarde > 0) return;
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-    });
-
-    if (error) {
-      setErro(`Erro ao enviar: ${error.message}`);
-      return;
-    }
-
-    setEnviado(true);
-
-    setAguarde(60);
-    const timer = window.setInterval(() => {
-      setAguarde((s) => {
-        if (s <= 1) {
-          window.clearInterval(timer);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-  }
-
-  async function confirmarCodigo() {
-    setErro(null);
-
-    if (codigo.trim().length < 6) {
-      alert("Digite o código que chegou no seu e-mail.");
-      return;
-    }
-
-    setConfirmando(true);
-
-    const { error } = await supabase.auth.verifyOtp({
-      email,
-      token: codigo.trim(),
-      type: "email",
-    });
-
-    setConfirmando(false);
-
-    if (error) {
-      setErro("Código inválido ou expirado: " + error.message);
-      return;
-    }
-
-    // ✅ NOVO: registrar esse login no mailing (server-side)
-    // Observação: não bloqueia a navegação se falhar.
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-
-      if (token) {
-        fetch("/api/mailing/login", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }).catch(() => {});
-      }
-    } catch (_) {}
-
-    const destino = plano ? "/checkout?plano=" + plano : "/checkout";
-    router.push(destino);
-  }
-
-  return (
-    <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-      <h1 style={{ margin: 0 }}>Entrar</h1>
-
-      {planoTexto ? (
-        <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-          <div style={{ fontSize: 13, opacity: 0.75 }}>Plano escolhido</div>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{planoTexto}</div>
-        </div>
-      ) : (
-        <div style={{ fontSize: 13, opacity: 0.75 }}>(Você ainda não escolheu um plano.)</div>
-      )}
-
-      <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          Receber código por e-mail
-        </div>
-
-        <label style={{ display: "block", fontSize: 13, opacity: 0.75 }}>Seu e-mail</label>
-
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="nome@site.com"
-          inputMode="email"
-          style={{
-            marginTop: 6,
-            width: "100%",
-            height: 48,
-            borderRadius: 12,
-            border: "1px solid rgba(0,0,0,0.2)",
-            padding: "0 12px",
-            fontSize: 16,
-          }}
-        />
-
-        <button
-          type="button"
-          onClick={enviarLinkOuCodigo}
-          style={{
-            marginTop: 12,
-            width: "100%",
-            height: 52,
-            borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.15)",
-            fontSize: 16,
-            background: "white",
-            cursor: "pointer",
-          }}
-        >
-          {aguarde > 0 ? `Aguarde ${aguarde}s para reenviar` : "Enviar código por e-mail"}
-        </button>
-
-        {erro && (
-          <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>
-            {erro}
-          </div>
-        )}
-
-        {enviado && (
-          <div
-            style={{
-              marginTop: 12,
-              borderRadius: 12,
-              padding: 12,
-              background: "rgba(0,0,0,0.05)",
-              lineHeight: 1.35,
-            }}
-          >
-            <div style={{ fontWeight: 700 }}>Pronto.</div>
-
-            <div style={{ fontSize: 13, opacity: 0.85, marginTop: 6 }}>
-              Enviamos um código para <b>{email}</b>.
-              <br />
-              Se não chegar em 1–2 minutos, confira o Spam/Lixo eletrônico.
-            </div>
-
-            <div style={{ marginTop: 14 }}>
-              <label style={{ display: "block", fontSize: 13, opacity: 0.75 }}>
-                Digite o código (normalmente 8 dígitos)
-              </label>
-
-              <input
-                value={codigo}
-                onChange={(e) => setCodigo(e.target.value)}
-                placeholder="12345678"
-                inputMode="numeric"
-                style={{
-                  marginTop: 6,
-                  width: "100%",
-                  height: 48,
-                  borderRadius: 12,
-                  border: "1px solid rgba(0,0,0,0.2)",
-                  padding: "0 12px",
-                  fontSize: 16,
-                  letterSpacing: 3,
-                  textAlign: "center",
-                }}
-              />
-
-              <button
-                type="button"
-                onClick={confirmarCodigo}
-                style={{
-                  marginTop: 10,
-                  width: "100%",
-                  height: 48,
-                  borderRadius: 14,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  fontSize: 15,
-                  background: "white",
-                  cursor: "pointer",
-                  opacity: confirmando ? 0.6 : 1,
-                }}
-              >
-                {confirmando ? "Confirmando..." : "Confirmar código e entrar"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <Link
-        href="/"
-        style={{
-          height: 52,
-          borderRadius: 16,
-          border: "1px solid rgba(0,0,0,0.15)",
-          fontSize: 16,
-          background: "white",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textDecoration: "none",
-          color: "black",
-        }}
-      >
-        Voltar para a landing
-      </Link>
-    </main>
-  );
+  return { experience_id, qr_point_id };
 }
 
 export default function LoginPage() {
+  const router = useRouter();
+
+  const tracking = useMemo(() => {
+    if (typeof window === "undefined") {
+      return { experience_id: "default", qr_point_id: "" };
+    }
+    return readTrackingFromUrl();
+  }, []);
+
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Se já estiver logado, volta pro Journey
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        const qs = new URLSearchParams();
+        qs.set("exp", tracking.experience_id);
+        if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
+        router.replace(`/journey?${qs.toString()}`);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function sendOtp() {
+    setError(null);
+
+    const e = email.trim();
+    if (!e) {
+      setError("Digite seu e-mail.");
+      return;
+    }
+
+    const qs = new URLSearchParams();
+    qs.set("exp", tracking.experience_id);
+    if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: e,
+      options: {
+        // Depois do clique no e-mail, volta para a Journey com exp/qr
+        emailRedirectTo: `${window.location.origin}/journey?${qs.toString()}`,
+      },
+    });
+
+    if (error) setError(error.message);
+    else setSent(true);
+  }
+
+  async function verifyOtp() {
+    setError(null);
+
+    const e = email.trim();
+    const t = code.trim();
+
+    if (!e) return setError("Digite seu e-mail.");
+    if (!t) return setError("Digite o código.");
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: e,
+      token: t,
+      type: "email",
+    });
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    // ✅ Analytics: OTP_LOGIN (login efetivo do usuário)
+    try {
+      const user_id = data?.user?.id;
+      if (user_id) {
+        await fetch("/api/analytics/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            experience_id: tracking.experience_id,
+            event_type: "otp_login",
+            user_id,
+            qr_point_id: tracking.qr_point_id || null, // opcional, mas útil
+          }),
+          cache: "no-store",
+        });
+      }
+    } catch {
+      // não quebra o login
+    }
+
+    const qs = new URLSearchParams();
+    qs.set("exp", tracking.experience_id);
+    if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
+
+    router.replace(`/journey?${qs.toString()}`);
+  }
+
   return (
-    <Suspense fallback={<main style={{ padding: 16 }}>Carregando login…</main>}>
-      <LoginInner />
-    </Suspense>
+    <main style={{ padding: 24, fontFamily: "system-ui, sans-serif", maxWidth: 420 }}>
+      <h1 style={{ fontSize: 24, marginBottom: 12 }}>Entrar</h1>
+
+      {!sent ? (
+        <>
+          <p style={{ marginBottom: 12 }}>
+            Digite seu e-mail para receber um código de acesso.
+          </p>
+
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="seu@email.com"
+            style={{ width: "100%", padding: 10, marginBottom: 12 }}
+          />
+
+          <button onClick={sendOtp} style={{ width: "100%", padding: 12 }}>
+            Enviar código
+          </button>
+
+          <p style={{ marginTop: 12, opacity: 0.7, fontSize: 12 }}>
+            Experiência: <strong>{tracking.experience_id}</strong>
+            {tracking.qr_point_id ? (
+              <>
+                {" "}
+                · Ponto: <strong>{tracking.qr_point_id}</strong>
+              </>
+            ) : null}
+          </p>
+        </>
+      ) : (
+        <>
+          <p style={{ marginBottom: 12 }}>
+            Digite o código enviado para <strong>{email}</strong>
+          </p>
+
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            style={{ width: "100%", padding: 10, marginBottom: 12 }}
+          />
+
+          <button onClick={verifyOtp} style={{ width: "100%", padding: 12 }}>
+            Entrar
+          </button>
+        </>
+      )}
+
+      {error && <p style={{ marginTop: 12, color: "red" }}>Erro: {error}</p>}
+    </main>
   );
 }
