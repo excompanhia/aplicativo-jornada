@@ -16,6 +16,7 @@ export async function POST(req: Request) {
     const user_id = body?.user_id ?? null;
     const anon_id = body?.anon_id ?? null;
     const occurred_at = body?.occurred_at ?? null; // opcional
+    const qr_point_id = body?.qr_point_id ?? null; // NOVO (opcional)
 
     if (typeof experience_id !== "string" || experience_id.trim().length === 0) {
       return NextResponse.json(
@@ -27,6 +28,14 @@ export async function POST(req: Request) {
     if (!isValidEventType(event_type)) {
       return NextResponse.json(
         { ok: false, error: "invalid_event_type" },
+        { status: 400 }
+      );
+    }
+
+    // valida qr_point_id (se vier)
+    if (qr_point_id !== null && typeof qr_point_id !== "string") {
+      return NextResponse.json(
+        { ok: false, error: "invalid_qr_point_id" },
         { status: 400 }
       );
     }
@@ -72,13 +81,12 @@ export async function POST(req: Request) {
       event_type,
       user_id: user_id ? user_id : null,
       anon_id: anon_id ? anon_id : null,
+      qr_point_id: qr_point_id ? String(qr_point_id).trim() : null,
     };
 
     if (occurredAtToInsert) insertPayload.occurred_at = occurredAtToInsert;
 
-    const { error } = await supabase
-      .from("analytics_events")
-      .insert(insertPayload);
+    const { error } = await supabase.from("analytics_events").insert(insertPayload);
 
     if (error) {
       return NextResponse.json(
