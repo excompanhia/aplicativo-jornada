@@ -20,12 +20,80 @@ const KEY_INDEX = "jornada:journey:index";
 const KEY_PLAYING = "jornada:journey:playing";
 const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
 
+// Analytics keys
+const KEY_ANON_ID = "jornada:anon_id";
+
 // ✅ BLOCO 3: polimento preload (UI simples)
 type PreloadUiState =
   | { status: "idle" }
   | { status: "running"; done: number; total: number; lastUrl?: string }
   | { status: "done"; total: number }
   | { status: "error"; message: string };
+
+function safeLocalGet(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeLocalSet(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {}
+}
+function safeSessionGet(key: string) {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeSessionSet(key: string, value: string) {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {}
+}
+
+function getOrCreateAnonId() {
+  const existing = safeLocalGet(KEY_ANON_ID);
+  if (existing) return existing;
+
+  let id = "";
+  try {
+    // navegadores modernos
+    // @ts-ignore
+    id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "";
+  } catch {}
+
+  if (!id) {
+    // fallback simples
+    id = `anon_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+
+  safeLocalSet(KEY_ANON_ID, id);
+  return id;
+}
+
+function readTrackingFromUrl() {
+  // aceita vários nomes para facilitar sua vida na hora de criar QR
+  const params = new URLSearchParams(window.location.search);
+
+  const experience_id =
+    (params.get("exp") ||
+      params.get("experience_id") ||
+      params.get("experience") ||
+      "default"
+    ).trim();
+
+  const qr_point_id =
+    (params.get("qr") ||
+      params.get("qr_point_id") ||
+      params.get("point") ||
+      "").trim();
+
+  return { experience_id, qr_point_id };
+}
 
 export default function JourneyPage() {
   const [index, setIndex] = useState(0);
@@ -96,6 +164,44 @@ export default function JourneyPage() {
     safeSet(KEY_PLAYING, String(!latestPausedRef.current));
     safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
   }
+
+  // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
+  const analyticsStartedRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (analyticsStartedRef.current) return;
+    analyticsStartedRef.current = true;
+
+    try {
+      const { experience_id, qr_point_id } = readTrackingFromUrl();
+
+      // Se não veio qr_point_id, a gente ainda registra como "unknown"
+      // (ou você pode preferir NÃO registrar; me diga e eu ajusto)
+      const point = qr_point_id || "unknown";
+
+      const anon_id = getOrCreateAnonId();
+
+      // trava por sessão pra não inflar com refresh
+      const sessionKey = `jornada:qr_open:sent:${experience_id}:${point}`;
+      if (safeSessionGet(sessionKey) === "true") return;
+      safeSessionSet(sessionKey, "true");
+
+      // fire-and-forget
+      fetch("/api/analytics/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          experience_id,
+          event_type: "qr_open",
+          anon_id,
+          qr_point_id: point,
+        }),
+        cache: "no-store",
+      }).catch(() => {});
+    } catch {
+      // não quebra o app
+    }
+  }, []);
 
   // ✅ restaura após reload (ou primeira entrada)
   const restoredOnceRef = useRef(false);
