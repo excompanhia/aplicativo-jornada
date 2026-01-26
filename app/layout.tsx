@@ -17,7 +17,6 @@ export default function RootLayout({
     if (!splash || !app) return;
 
     if (!shouldShow) {
-      // não precisa splash -> garante app visível
       splash.style.display = "none";
       app.style.visibility = "visible";
       return;
@@ -25,11 +24,9 @@ export default function RootLayout({
 
     sessionStorage.setItem(KEY, "true");
 
-    // mostra splash e esconde app imediatamente
     splash.style.display = "flex";
     app.style.visibility = "hidden";
 
-    // depois de 3s, esconde splash e mostra app
     setTimeout(function () {
       splash.style.display = "none";
       app.style.visibility = "visible";
@@ -46,8 +43,6 @@ export default function RootLayout({
         style={{
           margin: 0,
           background: "#f2f2f2",
-          display: "flex",
-          justifyContent: "center",
         }}
       >
         {/* Splash (fica off por padrão; script liga quando precisa) */}
@@ -75,15 +70,13 @@ export default function RootLayout({
           />
         </div>
 
-        {/* App shell */}
+        {/* App root (agora NÃO força largura) */}
         <div
           id="jornada-app"
           style={{
             width: "100%",
-            maxWidth: 430,
             minHeight: "100vh",
             background: "white",
-            // começa visível por padrão; o script pode esconder por 3s
             visibility: "visible",
           }}
         >
