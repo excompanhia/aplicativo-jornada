@@ -17,7 +17,7 @@ export default function AdminBuilderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Controles (por enquanto só “mock” pra provar o builder)
+  // Controles (mock por enquanto)
   const [appTitle, setAppTitle] = useState("Jornada");
   const [tabTitle, setTabTitle] = useState("Início");
   const [buttonLabel, setButtonLabel] = useState("Começar");
@@ -31,14 +31,12 @@ export default function AdminBuilderPage() {
     (async () => {
       setError(null);
 
-      // 1) precisa ter sessão
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) {
         router.replace("/admin/login");
         return;
       }
 
-      // 2) validar admin por e-mail (client-side)
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       if (userErr || !userData?.user?.email) {
         router.replace("/admin/login");
@@ -47,7 +45,6 @@ export default function AdminBuilderPage() {
 
       if (userData.user.email !== ADMIN_EMAIL) {
         setError("not_admin");
-        // expulsa do admin por segurança
         await logout();
         return;
       }
@@ -66,16 +63,23 @@ export default function AdminBuilderPage() {
   }
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      {/* Layout desktop: esquerda controles / direita preview.
-          Layout mobile: vira coluna (normal). */}
+    <main
+      style={{
+        padding: 24,
+        fontFamily: "system-ui, sans-serif",
+        minHeight: "100vh",
+        boxSizing: "border-box",
+      }}
+    >
+      {/* Ocupa a tela toda:
+          - ESQUERDA: controles (cresce)
+          - DIREITA: preview (largura fixa do “celular”) */}
       <div
         style={{
-          maxWidth: 1400,
-          margin: "0 auto",
+          width: "100%",
           display: "grid",
-          gridTemplateColumns: "minmax(320px, 420px) 1fr",
-          gap: 16,
+          gridTemplateColumns: "1fr 430px",
+          gap: 28,
           alignItems: "start",
         }}
       >
@@ -84,19 +88,27 @@ export default function AdminBuilderPage() {
           style={{
             border: "1px solid rgba(0,0,0,0.12)",
             borderRadius: 12,
-            padding: 16,
+            padding: 18,
             background: "white",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-            <h1 style={{ fontSize: 18, margin: 0 }}>Admin — Builder</h1>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <h1 style={{ fontSize: 20, margin: 0 }}>Admin — Builder</h1>
             <button onClick={logout} style={{ padding: "8px 10px" }}>
               Sair
             </button>
           </div>
 
           <p style={{ marginTop: 10, marginBottom: 14, opacity: 0.8 }}>
-            Aqui é o modo “construção do app”: controles + preview de celular.
+            Controles à esquerda + preview de celular à direita.
           </p>
 
           {error && (
@@ -105,13 +117,17 @@ export default function AdminBuilderPage() {
             </p>
           )}
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
             <label style={{ display: "grid", gap: 6 }}>
               <span style={{ fontSize: 12, opacity: 0.75 }}>Título do app</span>
               <input
                 value={appTitle}
                 onChange={(e) => setAppTitle(e.target.value)}
-                style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                }}
               />
             </label>
 
@@ -120,7 +136,11 @@ export default function AdminBuilderPage() {
               <input
                 value={tabTitle}
                 onChange={(e) => setTabTitle(e.target.value)}
-                style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                }}
               />
             </label>
 
@@ -129,24 +149,26 @@ export default function AdminBuilderPage() {
               <input
                 value={buttonLabel}
                 onChange={(e) => setButtonLabel(e.target.value)}
-                style={{ padding: 10, borderRadius: 8, border: "1px solid rgba(0,0,0,0.2)" }}
+                style={{
+                  padding: 10,
+                  borderRadius: 8,
+                  border: "1px solid rgba(0,0,0,0.2)",
+                }}
               />
             </label>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-              <button
-                onClick={() => router.push("/admin")}
-                style={{ padding: "10px 12px" }}
-              >
+              <button onClick={() => router.push("/admin")} style={{ padding: "10px 12px" }}>
                 Ir para Mailing (dados)
               </button>
 
-              <button
-                onClick={() => window.open("/journey", "_blank")}
-                style={{ padding: "10px 12px" }}
-              >
+              <button onClick={() => window.open("/journey", "_blank")} style={{ padding: "10px 12px" }}>
                 Abrir Journey (nova aba)
               </button>
+            </div>
+
+            <div style={{ marginTop: 10, opacity: 0.7, fontSize: 12 }}>
+              Obs.: depois a gente vai trocar esse “mock” por um preview real (ou por telas reais do app).
             </div>
           </div>
         </aside>
@@ -155,15 +177,14 @@ export default function AdminBuilderPage() {
         <section
           style={{
             display: "flex",
-            justifyContent: "center",
-            padding: 8,
+            justifyContent: "flex-end",
+            paddingRight: 8,
           }}
         >
-          {/* “Moldura” do celular */}
+          {/* Moldura do celular */}
           <div
             style={{
               width: 390,
-              maxWidth: "100%",
               borderRadius: 28,
               padding: 14,
               border: "1px solid rgba(0,0,0,0.25)",
@@ -182,13 +203,11 @@ export default function AdminBuilderPage() {
                 flexDirection: "column",
               }}
             >
-              {/* Top bar fake */}
               <div style={{ padding: 14, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
                 <div style={{ fontSize: 18, fontWeight: 700 }}>{appTitle || "—"}</div>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>Preview de celular</div>
               </div>
 
-              {/* Conteúdo fake */}
               <div style={{ padding: 16, flex: 1, display: "grid", gap: 12 }}>
                 <div style={{ fontSize: 14, opacity: 0.8 }}>
                   Aba atual: <strong>{tabTitle || "—"}</strong>
@@ -221,7 +240,6 @@ export default function AdminBuilderPage() {
                 </button>
               </div>
 
-              {/* Bottom tab fake */}
               <div style={{ borderTop: "1px solid rgba(0,0,0,0.08)", padding: 12, display: "flex", gap: 8 }}>
                 <div style={{ padding: "8px 10px", borderRadius: 999, background: "rgba(0,0,0,0.06)" }}>
                   {tabTitle || "—"}
@@ -235,8 +253,19 @@ export default function AdminBuilderPage() {
         </section>
       </div>
 
-      {/* Mobile: se a tela ficar estreita, o grid naturalmente quebra visualmente,
-          mas se quiser, depois a gente coloca uma regra mais explícita. */}
+      {/* Ajuste simples para telas menores (mobile):
+          se ficar estreito demais, empilha em coluna. */}
+      <style jsx>{`
+        @media (max-width: 980px) {
+          div[style*="grid-template-columns: 1fr 430px"] {
+            grid-template-columns: 1fr !important;
+          }
+          section {
+            justify-content: center !important;
+            padding-right: 0 !important;
+          }
+        }
+      `}</style>
     </main>
   );
 }
