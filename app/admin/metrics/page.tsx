@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
+type Experience = {
+  id: string;
+  slug: string;
+  title: string;
+  is_active: boolean;
+  created_at: string;
+};
+
 type MetricsResponse = {
   ok: boolean;
   totals: {
@@ -60,6 +68,9 @@ export default function AdminMetricsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
+  const [experiences, setExperiences] = useState<Experience[]>([]);
+  const [loadingExperiences, setLoadingExperiences] = useState(false);
+
   const [viewMode, setViewMode] = useState<ViewMode>("all");
 
   const [loading, setLoading] = useState(false);
@@ -76,6 +87,29 @@ export default function AdminMetricsPage() {
     if (from) params.set("from", from);
     if (to) params.set("to", to);
     return params;
+  }
+
+  async function loadExperiences() {
+    setLoadingExperiences(true);
+    try {
+      const res = await fetch("/api/admin/experiences", { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        // não trava o painel: só não mostra opções
+        setExperiences([]);
+        return;
+      }
+
+      const list: Experience[] = Array.isArray(json.experiences)
+        ? json.experiences
+        : [];
+
+      // só ativas (opcional, mas seguro)
+      setExperiences(list.filter((e) => e.is_active));
+    } finally {
+      setLoadingExperiences(false);
+    }
   }
 
   async function load() {
@@ -161,7 +195,9 @@ export default function AdminMetricsPage() {
       return data.byDay.filter((d) => (d.purchase ?? 0) > 0);
     }
 
-    return data.byDay.filter((d) => (d.qr_open ?? 0) > 0 && (d.purchase ?? 0) === 0);
+    return data.byDay.filter(
+      (d) => (d.qr_open ?? 0) > 0 && (d.purchase ?? 0) === 0
+    );
   }, [data, viewMode]);
 
   async function exportMetricsCsv() {
@@ -172,12 +208,17 @@ export default function AdminMetricsPage() {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
-      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+      if (!token)
+        throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
 
       if (viewMode === "all") {
-        await downloadCsv(`/api/admin/metrics/export?${params.toString()}`, token, "metrics.csv");
+        await downloadCsv(
+          `/api/admin/metrics/export?${params.toString()}`,
+          token,
+          "metrics.csv"
+        );
         return;
       }
 
@@ -241,10 +282,15 @@ export default function AdminMetricsPage() {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
-      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+      if (!token)
+        throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
-      await downloadCsv(`/api/admin/mailing/export?${params.toString()}`, token, "mailing.csv");
+      await downloadCsv(
+        `/api/admin/mailing/export?${params.toString()}`,
+        token,
+        "mailing.csv"
+      );
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -260,10 +306,15 @@ export default function AdminMetricsPage() {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
-      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+      if (!token)
+        throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
-      await downloadCsv(`/api/admin/metrics/export-raw?${params.toString()}`, token, "events_raw.csv");
+      await downloadCsv(
+        `/api/admin/metrics/export-raw?${params.toString()}`,
+        token,
+        "events_raw.csv"
+      );
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -297,11 +348,24 @@ export default function AdminMetricsPage() {
         minWidth: 180,
       }}
     >
-      <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700, letterSpacing: 0.2 }}>
+      <div
+        style={{
+          fontSize: 12,
+          color: "#6B7280",
+          fontWeight: 700,
+          letterSpacing: 0.2,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{value}</div>
-      {hint ? <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{hint}</div> : null}
+      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>
+        {value}
+      </div>
+      {hint ? (
+        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+          {hint}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -336,6 +400,7 @@ export default function AdminMetricsPage() {
   });
 
   useEffect(() => {
+    loadExperiences();
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -353,7 +418,14 @@ export default function AdminMetricsPage() {
         }}
       >
         <div>
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#6B7280",
+              fontWeight: 800,
+              letterSpacing: 0.2,
+            }}
+          >
             ADMIN
           </div>
           <h1 style={{ margin: "6px 0 0", fontSize: 28 }}>Métricas</h1>
@@ -371,17 +443,36 @@ export default function AdminMetricsPage() {
             minWidth: 320,
           }}
         >
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#6B7280",
+              fontWeight: 800,
+              letterSpacing: 0.2,
+            }}
+          >
             EXPORTAR
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <button style={buttonPrimary(exportingMetrics)} onClick={exportMetricsCsv} disabled={exportingMetrics}>
+            <button
+              style={buttonPrimary(exportingMetrics)}
+              onClick={exportMetricsCsv}
+              disabled={exportingMetrics}
+            >
               {exportingMetrics ? "Exportando…" : "CSV Métricas"}
             </button>
-            <button style={buttonGhost(exportingMailing)} onClick={exportMailingCsv} disabled={exportingMailing}>
+            <button
+              style={buttonGhost(exportingMailing)}
+              onClick={exportMailingCsv}
+              disabled={exportingMailing}
+            >
               {exportingMailing ? "Exportando…" : "CSV Mailing"}
             </button>
-            <button style={buttonGhost(exportingRaw)} onClick={exportRawEventsCsv} disabled={exportingRaw}>
+            <button
+              style={buttonGhost(exportingRaw)}
+              onClick={exportRawEventsCsv}
+              disabled={exportingRaw}
+            >
               {exportingRaw ? "Exportando…" : "CSV Eventos brutos"}
             </button>
           </div>
@@ -400,9 +491,11 @@ export default function AdminMetricsPage() {
       >
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700 }}>experience_id</div>
-            <input
-              placeholder="ex: teste_01"
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700 }}>
+              Experiência
+            </div>
+
+            <select
               value={exp}
               onChange={(e) => setExp(e.target.value)}
               style={{
@@ -412,7 +505,21 @@ export default function AdminMetricsPage() {
                 minWidth: 220,
                 background: "#fff",
               }}
-            />
+            >
+              <option value="">
+                {loadingExperiences ? "Carregando…" : "Todas"}
+              </option>
+
+              {experiences.map((ex) => (
+                <option key={ex.id} value={ex.slug}>
+                  {ex.title}
+                </option>
+              ))}
+            </select>
+
+            <div style={{ fontSize: 12, color: "#6B7280" }}>
+              valor técnico: <b>{exp || "todas"}</b>
+            </div>
           </div>
 
           <div style={{ display: "grid", gap: 6 }}>
@@ -470,8 +577,18 @@ export default function AdminMetricsPage() {
         </div>
 
         {/* Ver */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>VER</div>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            marginTop: 12,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>
+            VER
+          </div>
           <button style={chipStyle(viewMode === "all")} onClick={() => setViewMode("all")}>
             Todos
           </button>
@@ -525,22 +642,13 @@ export default function AdminMetricsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
               <thead>
                 <tr style={{ background: "#F9FAFB" }}>
-                  <th
-                    align="left"
-                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
-                  >
+                  <th align="left" style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}>
                     DIA
                   </th>
-                  <th
-                    align="right"
-                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
-                  >
+                  <th align="right" style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}>
                     ENTRARAM
                   </th>
-                  <th
-                    align="right"
-                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
-                  >
+                  <th align="right" style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}>
                     COMPRARAM
                   </th>
                 </tr>
