@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { stations } from "../lib/stations";
 import { collectStationAssets } from "@/app/lib/preloadStations";
 import { preloadAssets } from "@/app/lib/preloadRunner";
@@ -96,8 +96,13 @@ function readTrackingFromUrl() {
 }
 
 export default function JourneyPage() {
+  const router = useRouter();
+
   const [index, setIndex] = useState(0);
   const current = stations[index];
+
+  // ✅ Biblioteca overlay
+  const [showLibrary, setShowLibrary] = useState(false);
 
   // swipe
   const startX = useRef<number | null>(null);
@@ -175,18 +180,13 @@ export default function JourneyPage() {
     try {
       const { experience_id, qr_point_id } = readTrackingFromUrl();
 
-      // Se não veio qr_point_id, a gente ainda registra como "unknown"
-      // (ou você pode preferir NÃO registrar; me diga e eu ajusto)
       const point = qr_point_id || "unknown";
-
       const anon_id = getOrCreateAnonId();
 
-      // trava por sessão pra não inflar com refresh
       const sessionKey = `jornada:qr_open:sent:${experience_id}:${point}`;
       if (safeSessionGet(sessionKey) === "true") return;
       safeSessionSet(sessionKey, "true");
 
-      // fire-and-forget
       fetch("/api/analytics/event", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,9 +198,7 @@ export default function JourneyPage() {
         }),
         cache: "no-store",
       }).catch(() => {});
-    } catch {
-      // não quebra o app
-    }
+    } catch {}
   }, []);
 
   // ✅ restaura após reload (ou primeira entrada)
@@ -217,10 +215,8 @@ export default function JourneyPage() {
 
     const wasPlaying = safeGet(KEY_PLAYING) === "true";
 
-    // 1) seta a estação
     setIndex(safeIndex);
 
-    // 2) depois de render, aplica o seek e retoma
     window.setTimeout(() => {
       const st = stations[safeIndex];
       if (!st?.id) return;
@@ -232,13 +228,12 @@ export default function JourneyPage() {
       setSeekTo(safePos);
 
       if (wasPlaying) {
-        // dá um tempo pro seek “pegar”
         window.setTimeout(() => setPlaySignal((v) => v + 1), 250);
       }
     }, 250);
   }, []);
 
-  // ✅ salva continuamente enquanto toca (para “blindar” contra reload do SO)
+  // ✅ salva continuamente enquanto toca
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -263,7 +258,6 @@ export default function JourneyPage() {
       saveSnapshot();
     }
     function onOnline() {
-      // não muda UX — só salva
       saveSnapshot();
     }
 
@@ -301,31 +295,20 @@ export default function JourneyPage() {
       try {
         const urls = collectStationAssets(stations);
 
-        // garante que a "memória" corresponde ao conjunto atual
         ensureManifestForUrls(urls);
-
-        // só baixa o que ainda não temos
         const missing = filterMissingUrls(urls);
 
         if (missing.length === 0) {
-          // já está tudo offline
           setPreloadUi({ status: "done", total: 0 });
-          // some rápido (fica invisível pro usuário)
           window.setTimeout(() => setPreloadUi({ status: "idle" }), 800);
           return;
         }
 
-        // inicia UI
         setPreloadUi({ status: "running", done: 0, total: missing.length });
-
-        let done = 0;
 
         await preloadAssets(missing, {
           delayMs: 300,
           onProgress: (currentNum, total, url) => {
-            // currentNum já é 1..total
-            done = currentNum;
-
             setPreloadUi({
               status: "running",
               done: currentNum,
@@ -338,10 +321,7 @@ export default function JourneyPage() {
           },
         });
 
-        // terminou
         setPreloadUi({ status: "done", total: missing.length });
-
-        // some sozinho (UX limpa)
         window.setTimeout(() => setPreloadUi({ status: "idle" }), 2000);
       } catch (err: any) {
         setPreloadUi({
@@ -349,7 +329,6 @@ export default function JourneyPage() {
           message: err?.message ? String(err.message) : "Erro no preload offline",
         });
 
-        // some depois (não fica gritando)
         window.setTimeout(() => setPreloadUi({ status: "idle" }), 2500);
       }
     })();
@@ -383,15 +362,39 @@ export default function JourneyPage() {
     setIndex((v) => clampIndex(v - 1));
   }
 
+  // ✅ Biblioteca: escolher estação
+  function goToStation(targetIndex: number) {
+    const safeIndex = clampIndex(targetIndex);
+
+    // comportamento igual a trocar de estação manualmente:
+    // salva estado e pausa antes de mudar
+    saveSnapshot();
+    setPauseSignal((v) => v + 1);
+
+    setIndex(safeIndex);
+    setShowLibrary(false);
+  }
+
+  // ✅ Biblioteca: sair para landing
+  function exitToLanding() {
+    // salva o estado atual antes de sair
+    saveSnapshot();
+    safeSet(KEY_PLAYING, "false");
+    setPauseSignal((v) => v + 1);
+
+    router.replace("/");
+  }
+
   // swipe
   function onPointerDown(e: React.PointerEvent) {
-    if (isAnimating) return;
+    if (isAnimating || showLibrary) return;
     startX.current = e.clientX;
     deltaX.current = 0;
     setDragX(0);
   }
 
   function onPointerMove(e: React.PointerEvent) {
+    if (showLibrary) return;
     if (startX.current === null || isAnimating) return;
     const dx = e.clientX - startX.current;
     deltaX.current = dx;
@@ -399,6 +402,7 @@ export default function JourneyPage() {
   }
 
   function onPointerUp() {
+    if (showLibrary) return;
     if (startX.current === null || isAnimating) return;
 
     const threshold = 60;
@@ -436,22 +440,33 @@ export default function JourneyPage() {
   return (
     <AccessGuard>
       <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Top bar */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link href="/library" style={{ textDecoration: "none", fontSize: 13 }}>
-            ← Biblioteca
-          </Link>
+          <button
+            type="button"
+            onClick={() => setShowLibrary(true)}
+            style={{
+              height: 34,
+              padding: "0 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            BIBLIOTECA
+          </button>
 
           <div style={{ fontSize: 13, opacity: 0.75 }}>
             {index + 1} / {stations.length}
           </div>
 
-          <div style={{ width: 72 }} />
+          <div style={{ width: 88 }} />
         </div>
 
         {/* ✅ BLOCO 3: feedback visual do preload (discreto) */}
-        {preloadUi.status !== "idle" && (
-          <PreloadBanner state={preloadUi} />
-        )}
+        {preloadUi.status !== "idle" && <PreloadBanner state={preloadUi} />}
 
         <div
           onPointerDown={onPointerDown}
@@ -501,6 +516,7 @@ export default function JourneyPage() {
               border: "1px solid rgba(0,0,0,0.15)",
               background: "white",
               opacity: canGoPrev ? 1 : 0.4,
+              cursor: canGoPrev ? "pointer" : "default",
             }}
           >
             ← Anterior
@@ -516,6 +532,7 @@ export default function JourneyPage() {
               border: "1px solid rgba(0,0,0,0.15)",
               background: "white",
               opacity: canGoNext ? 1 : 0.4,
+              cursor: canGoNext ? "pointer" : "default",
             }}
           >
             Próxima →
@@ -529,6 +546,130 @@ export default function JourneyPage() {
           requestPause={pauseSignal}
           requestSeekTo={seekTo}
         />
+
+        {/* ✅ Biblioteca Overlay */}
+        {showLibrary && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 2000,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              style={{
+                width: "100%",
+                maxWidth: 520,
+                maxHeight: "85vh",
+                background: "white",
+                borderRadius: 18,
+                border: "1px solid rgba(0,0,0,0.15)",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              {/* Header: SAIR / CONTINUAR */}
+              <div
+                style={{
+                  padding: 12,
+                  borderBottom: "1px solid rgba(0,0,0,0.10)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={exitToLanding}
+                  style={{
+                    height: 36,
+                    padding: "0 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  SAIR
+                </button>
+
+                <div style={{ fontSize: 13, fontWeight: 800, opacity: 0.85 }}>
+                  BIBLIOTECA
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowLibrary(false)}
+                  style={{
+                    height: 36,
+                    padding: "0 12px",
+                    borderRadius: 12,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  CONTINUAR
+                </button>
+              </div>
+
+              {/* Lista */}
+              <div style={{ padding: 12, overflow: "auto" }}>
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 10 }}>
+                  Escolha uma estação:
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {stations.map((st, i) => {
+                    const isCurrent = i === index;
+                    return (
+                      <button
+                        key={st.id || String(i)}
+                        type="button"
+                        onClick={() => goToStation(i)}
+                        style={{
+                          textAlign: "left",
+                          padding: "12px 12px",
+                          borderRadius: 14,
+                          border: "1px solid rgba(0,0,0,0.15)",
+                          background: isCurrent ? "rgba(0,0,0,0.04)" : "white",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>
+                            {st.title}
+                          </div>
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>
+                            Estação {i + 1}
+                            {isCurrent ? " — (agora)" : ""}
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: 12, opacity: 0.65 }}>
+                          abrir →
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </AccessGuard>
   );
@@ -563,9 +704,7 @@ function PreloadBanner({ state }: { state: PreloadUiState }) {
       <div style={{ fontWeight: 600 }}>{text}</div>
 
       {state.status === "running" && (
-        <div style={{ opacity: 0.7, fontSize: 12 }}>
-          preparando uso offline…
-        </div>
+        <div style={{ opacity: 0.7, fontSize: 12 }}>preparando uso offline…</div>
       )}
     </div>
   );
@@ -613,6 +752,7 @@ function StationView({
               border: "1px solid rgba(0,0,0,0.15)",
               background: "white",
               fontWeight: 600,
+              cursor: "pointer",
             }}
           >
             {playerState.paused ? "Play" : "Pausar"}
