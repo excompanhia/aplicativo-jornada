@@ -32,6 +32,33 @@ function fullPriceFromMinutes(mins: number) {
   return 0;
 }
 
+function getJourneySlugFromPathname(): string {
+  if (typeof window === "undefined") return "";
+  const path = window.location.pathname || "";
+  const m = path.match(/^\/journey\/([^\/?#]+)/);
+  if (!m) return "";
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+function persistLastExp(slug: string) {
+  try {
+    if (!slug) return;
+    localStorage.setItem("jornada:last_exp", slug);
+  } catch {}
+}
+
+function getLastExpFallback(): string {
+  try {
+    return localStorage.getItem("jornada:last_exp") || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function AccessGuard({ children }: { children: ReactNode }) {
   const router = useRouter();
 
@@ -51,10 +78,19 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const [showWarning, setShowWarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ✅ exp atual (slug da rota) para manter o checkout amarrado
+  const expRef = useRef<string>("");
+
   function computeRemainingFromExpiry() {
     const expMs = expiresAtMsRef.current;
     if (!expMs) return 0;
     return Math.floor((expMs - Date.now()) / 1000);
+  }
+
+  function goExpired() {
+    const exp = expRef.current || getLastExpFallback();
+    const url = exp ? `/expired?exp=${encodeURIComponent(exp)}` : "/expired";
+    router.replace(url);
   }
 
   async function loadPassOnce() {
@@ -84,13 +120,14 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
     if (!res.ok || !json?.ok) {
       setError(json?.error || "Erro ao verificar passe.");
+      // não redireciona aqui; deixa o usuário ver erro se for caso extremo
       return;
     }
 
     const row = json?.pass ? (json.pass as PassRow) : null;
 
     if (!row) {
-      router.replace("/expired");
+      goExpired();
       return;
     }
 
@@ -101,7 +138,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     const rest = computeRemainingFromExpiry();
 
     if (rest <= 0) {
-      router.replace("/expired");
+      goExpired();
       return;
     }
 
@@ -114,6 +151,11 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
+    // ✅ captura exp da rota e persiste como fallback
+    const slug = getJourneySlugFromPathname();
+    expRef.current = slug;
+    persistLastExp(slug);
+
     loadPassOnce();
 
     // ✅ Cronômetro robusto: recalcula SEMPRE via expires_at - agora
@@ -122,7 +164,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
       if (next <= 0) {
         setRemainingSeconds(0);
-        router.replace("/expired");
+        goExpired();
         return;
       }
 
@@ -143,7 +185,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
         const next = computeRemainingFromExpiry();
         if (next <= 0) {
           setRemainingSeconds(0);
-          router.replace("/expired");
+          goExpired();
         } else {
           setRemainingSeconds(next);
         }
@@ -168,7 +210,11 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   }, []);
 
   function buyPlan(plano: "1h" | "2h" | "day") {
-    router.push("/checkout?plano=" + plano);
+    const exp = expRef.current || getLastExpFallback();
+    const url = exp
+      ? `/checkout?plano=${plano}&exp=${encodeURIComponent(exp)}`
+      : `/checkout?plano=${plano}`;
+    router.push(url);
   }
 
   // ✅ Renovação: aqui a UX manda para o checkout (o webhook é quem soma tempo)
@@ -180,8 +226,12 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     const plano: "1h" | "2h" | "day" =
       mins === 60 ? "1h" : mins === 120 ? "2h" : "day";
 
-    // ✅ sinaliza renovação no checkout (o seu checkout já manda metadata.is_renewal = true)
-    router.push(`/checkout?plano=${plano}&renew=1`);
+    const exp = expRef.current || getLastExpFallback();
+    const url = exp
+      ? `/checkout?plano=${plano}&renew=1&exp=${encodeURIComponent(exp)}`
+      : `/checkout?plano=${plano}&renew=1`;
+
+    router.push(url);
   }
 
   if (loading) {
