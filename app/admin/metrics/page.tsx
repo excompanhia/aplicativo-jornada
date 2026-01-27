@@ -26,6 +26,26 @@ function getSupabaseClient() {
   );
 }
 
+// helpers de data (UTC simples)
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function daysAgoISO(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+function startOfMonthISO() {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().slice(0, 10);
+}
+function startOfYearISO() {
+  const d = new Date();
+  d.setMonth(0, 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AdminMetricsPage() {
   const [exp, setExp] = useState("");
   const [from, setFrom] = useState("");
@@ -95,7 +115,6 @@ export default function AdminMetricsPage() {
     }
 
     const blob = await res.blob();
-
     const disposition = res.headers.get("content-disposition") || "";
     const match = disposition.match(/filename="([^"]+)"/);
     const filename = match?.[1] || fallbackName;
@@ -113,13 +132,11 @@ export default function AdminMetricsPage() {
   async function exportMetricsCsv() {
     setError(null);
     setExportingMetrics(true);
-
     try {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
-
       const token = session?.session?.access_token;
-      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+      if (!token) throw new Error("Sessão inválida.");
 
       const params = buildParams();
       await downloadCsv(`/api/admin/metrics/export?${params.toString()}`, token, "metrics.csv");
@@ -133,22 +150,27 @@ export default function AdminMetricsPage() {
   async function exportMailingCsv() {
     setError(null);
     setExportingMailing(true);
-
     try {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
-
       const token = session?.session?.access_token;
-      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+      if (!token) throw new Error("Sessão inválida.");
 
       const params = buildParams();
-      // OBS: o endpoint de mailing export usa from/to (exp é ignorado por enquanto)
       await downloadCsv(`/api/admin/mailing/export?${params.toString()}`, token, "mailing.csv");
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
       setExportingMailing(false);
     }
+  }
+
+  // atalhos de data
+  function applyRange(f: string, t: string) {
+    setFrom(f);
+    setTo(t);
+    // chama load no próximo tick para usar os novos estados
+    setTimeout(load, 0);
   }
 
   useEffect(() => {
@@ -166,7 +188,7 @@ export default function AdminMetricsPage() {
           display: "flex",
           gap: 12,
           flexWrap: "wrap",
-          marginBottom: 16,
+          marginBottom: 12,
           alignItems: "center",
         }}
       >
@@ -176,50 +198,29 @@ export default function AdminMetricsPage() {
           onChange={(e) => setExp(e.target.value)}
           style={{ padding: "8px 10px" }}
         />
-        <input
-          type="date"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          style={{ padding: "8px 10px" }}
-        />
-        <input
-          type="date"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          style={{ padding: "8px 10px" }}
-        />
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
 
-        <button onClick={load} disabled={loading} style={{ padding: "9px 12px" }}>
+        <button onClick={load} disabled={loading}>
           {loading ? "Carregando…" : "Aplicar filtros"}
         </button>
 
-        <button
-          onClick={exportMetricsCsv}
-          disabled={exportingMetrics}
-          style={{
-            padding: "9px 12px",
-            border: "1px solid #111827",
-            background: "#111827",
-            color: "#fff",
-            borderRadius: 8,
-          }}
-        >
+        <button onClick={exportMetricsCsv} disabled={exportingMetrics}>
           {exportingMetrics ? "Exportando…" : "Exportar CSV (métricas)"}
         </button>
 
-        <button
-          onClick={exportMailingCsv}
-          disabled={exportingMailing}
-          style={{
-            padding: "9px 12px",
-            border: "1px solid #E5E7EB",
-            background: "#fff",
-            color: "#111827",
-            borderRadius: 8,
-          }}
-        >
+        <button onClick={exportMailingCsv} disabled={exportingMailing}>
           {exportingMailing ? "Exportando…" : "Exportar CSV (mailing)"}
         </button>
+      </div>
+
+      {/* Atalhos de data */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        <button onClick={() => applyRange(todayISO(), todayISO())}>Hoje</button>
+        <button onClick={() => applyRange(daysAgoISO(6), todayISO())}>Últimos 7 dias</button>
+        <button onClick={() => applyRange(daysAgoISO(29), todayISO())}>Últimos 30 dias</button>
+        <button onClick={() => applyRange(startOfMonthISO(), todayISO())}>Este mês</button>
+        <button onClick={() => applyRange(startOfYearISO(), todayISO())}>Este ano</button>
       </div>
 
       {error && (
@@ -230,15 +231,8 @@ export default function AdminMetricsPage() {
 
       {data && (
         <>
-          {/* Totais */}
-          <div
-            style={{
-              display: "flex",
-              gap: 24,
-              marginBottom: 24,
-              flexWrap: "wrap",
-            }}
-          >
+          {/* Totais — SEMPRE refletem o período selecionado */}
+          <div style={{ display: "flex", gap: 24, marginBottom: 24, flexWrap: "wrap" }}>
             <div>
               <b>Entraram</b>
               <div>{data.totals.qr_open}</div>
