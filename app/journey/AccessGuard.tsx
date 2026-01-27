@@ -63,6 +63,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     // ✅ Se já foi liberado uma vez nesta sessão, não revalida
     if (accessGrantedRef.current) return;
 
+    // 1) pega sessão/token
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
 
@@ -71,21 +72,22 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    const uid = session.user.id;
+    const token = session.access_token;
 
-    const { data, error: qErr } = await supabase
-      .from("passes")
-      .select("id,user_id,status,duration_minutes,purchased_at,expires_at")
-      .eq("user_id", uid)
-      .order("expires_at", { ascending: false })
-      .limit(1);
+    // 2) consulta passe no servidor (não depende de RLS do client)
+    const res = await fetch("/api/auth/active-pass", {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
 
-    if (qErr) {
-      setError("Erro ao verificar passe: " + qErr.message);
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok || !json?.ok) {
+      setError(json?.error || "Erro ao verificar passe.");
       return;
     }
 
-    const row = data && data[0] ? (data[0] as PassRow) : null;
+    const row = json?.pass ? (json.pass as PassRow) : null;
 
     if (!row) {
       router.replace("/expired");
