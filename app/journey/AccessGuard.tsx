@@ -75,19 +75,25 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   // ✅ Fonte da verdade do tempo (vem do Supabase)
   const expiresAtMsRef = useRef<number | null>(null);
 
+  // ✅ Evita falso negativo: só consideramos expiração depois que o expires_at foi carregado
+  const hasExpiryRef = useRef(false);
+
   const [showWarning, setShowWarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // ✅ exp atual (slug da rota) para manter o checkout amarrado
   const expRef = useRef<string>("");
 
-  function computeRemainingFromExpiry() {
+  function computeRemainingFromExpiry(): number | null {
     const expMs = expiresAtMsRef.current;
-    if (!expMs) return 0;
+    if (!expMs) return null; // ainda não carregou a fonte da verdade
     return Math.floor((expMs - Date.now()) / 1000);
   }
 
   function goExpired() {
+    // ✅ Só pode expirar se já carregamos o expires_at (senão é falso negativo)
+    if (!hasExpiryRef.current) return;
+
     const exp = expRef.current || getLastExpFallback();
     const url = exp ? `/expired?exp=${encodeURIComponent(exp)}` : "/expired";
     router.replace(url);
@@ -120,13 +126,15 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
     if (!res.ok || !json?.ok) {
       setError(json?.error || "Erro ao verificar passe.");
-      // não redireciona aqui; deixa o usuário ver erro se for caso extremo
+      // mantém loading aqui porque não temos estado seguro ainda
       return;
     }
 
     const row = json?.pass ? (json.pass as PassRow) : null;
 
     if (!row) {
+      // aqui é seguro expirar porque a resposta veio do servidor
+      hasExpiryRef.current = true;
       goExpired();
       return;
     }
@@ -134,10 +142,12 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     // ✅ A verdade do tempo é o expires_at do Supabase
     const expiraMs = new Date(row.expires_at).getTime();
     expiresAtMsRef.current = expiraMs;
+    hasExpiryRef.current = true;
 
     const rest = computeRemainingFromExpiry();
 
-    if (rest <= 0) {
+    // se por algum motivo ficou inválido no exato momento
+    if (rest !== null && rest <= 0) {
       goExpired();
       return;
     }
@@ -146,21 +156,20 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     accessGrantedRef.current = true;
 
     setPass(row);
-    setRemainingSeconds(rest);
+    setRemainingSeconds(rest ?? 0);
     setLoading(false);
   }
 
-  useEffect(() => {
-    // ✅ captura exp da rota e persiste como fallback
-    const slug = getJourneySlugFromPathname();
-    expRef.current = slug;
-    persistLastExp(slug);
+  // ✅ timer começa SOMENTE quando já temos expires_at
+  function startTimerIfNeeded() {
+    if (tickRef.current) return;
+    if (!hasExpiryRef.current) return;
 
-    loadPassOnce();
-
-    // ✅ Cronômetro robusto: recalcula SEMPRE via expires_at - agora
     tickRef.current = window.setInterval(() => {
       const next = computeRemainingFromExpiry();
+
+      // ainda não carregou a fonte da verdade -> não faz nada
+      if (next === null) return;
 
       if (next <= 0) {
         setRemainingSeconds(0);
@@ -178,11 +187,28 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
         pauseAudioNow();
       }
     }, 1000);
+  }
+
+  useEffect(() => {
+    // ✅ captura exp da rota e persiste como fallback
+    const slug = getJourneySlugFromPathname();
+    expRef.current = slug;
+    persistLastExp(slug);
+
+    // roda a validação e só depois liga o timer
+    (async () => {
+      await loadPassOnce();
+      startTimerIfNeeded();
+    })();
 
     // ✅ Se o usuário saiu do app e voltou, recalcula imediatamente (sem “congelar” tempo)
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
         const next = computeRemainingFromExpiry();
+
+        // ainda não carregou -> não expira
+        if (next === null) return;
+
         if (next <= 0) {
           setRemainingSeconds(0);
           goExpired();
@@ -195,6 +221,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     // ✅ Se voltou online, recalcula, mas NÃO mexe na UX (zero redirect / zero reset)
     function onOnline() {
       const next = computeRemainingFromExpiry();
+      if (next === null) return;
       if (next > 0) setRemainingSeconds(next);
     }
 
@@ -203,6 +230,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
     return () => {
       if (tickRef.current) window.clearInterval(tickRef.current);
+      tickRef.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("online", onOnline);
     };
@@ -303,7 +331,14 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
               Renovar seu plano com 50% de desconto!
             </div>
 
-            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85, lineHeight: 1.35 }}>
+            <div
+              style={{
+                marginTop: 8,
+                fontSize: 14,
+                opacity: 0.85,
+                lineHeight: 1.35,
+              }}
+            >
               Faltam 5 minutos para terminar seu acesso.
             </div>
 
@@ -314,10 +349,19 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
             )}
 
             {error && (
-              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>{error}</div>
+              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>
+                {error}
+              </div>
             )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+                marginTop: 14,
+              }}
+            >
               <button
                 type="button"
                 onClick={renewSamePlanHalfCheckout}
