@@ -39,6 +39,7 @@ export default function Home() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isLogged, setIsLogged] = useState<boolean>(false);
+  const [userEmail, setUserEmail] = useState<string>(""); // ✅ NOVO
   const [activePass, setActivePass] = useState<PassInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +55,7 @@ export default function Home() {
 
       if (sessionErr) {
         setIsLogged(false);
+        setUserEmail(""); // ✅ NOVO
         setActivePass(null);
         setError("Não consegui verificar seu login.");
         return;
@@ -64,11 +66,13 @@ export default function Home() {
 
       if (!userId) {
         setIsLogged(false);
+        setUserEmail(""); // ✅ NOVO
         setActivePass(null);
         return;
       }
 
       setIsLogged(true);
+      setUserEmail(session?.user?.email || ""); // ✅ NOVO
 
       // procura passe ativo e válido
       const nowIso = new Date().toISOString();
@@ -95,6 +99,7 @@ export default function Home() {
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
       setIsLogged(false);
+      setUserEmail(""); // ✅ NOVO
       setActivePass(null);
     } finally {
       setIsLoading(false);
@@ -187,6 +192,13 @@ export default function Home() {
             Atualizar
           </button>
         </div>
+
+        {/* ✅ NOVO: mostrar email na landing (aba de status) */}
+        {isLogged && userEmail ? (
+          <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+            Logado como: <b>{userEmail}</b>
+          </div>
+        ) : null}
 
         {isLoading ? (
           <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
