@@ -65,6 +65,7 @@ export default function AdminMetricsPage() {
   const [loading, setLoading] = useState(false);
   const [exportingMetrics, setExportingMetrics] = useState(false);
   const [exportingMailing, setExportingMailing] = useState(false);
+  const [exportingRaw, setExportingRaw] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -176,9 +177,7 @@ export default function AdminMetricsPage() {
 
       const params = buildParams();
 
-      // ✅ CSV deve respeitar o filtro "Comprou/Não comprou/Todos"
-      // - Todos: usa endpoint server-side (como já está em produção)
-      // - Comprou/Não comprou: gera CSV no client usando a lista filtrada (o que você está vendo)
+      // CSV agregado respeita o filtro "Ver"
       if (viewMode === "all") {
         await downloadCsv(`/api/admin/metrics/export?${params.toString()}`, token, "metrics.csv");
         return;
@@ -247,12 +246,34 @@ export default function AdminMetricsPage() {
       if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
-      // OBS: mailing export usa from/to; exp é ignorado por enquanto (como já combinamos)
       await downloadCsv(`/api/admin/mailing/export?${params.toString()}`, token, "mailing.csv");
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
       setExportingMailing(false);
+    }
+  }
+
+  async function exportRawEventsCsv() {
+    setError(null);
+    setExportingRaw(true);
+
+    try {
+      const supabase = getSupabaseClient();
+      const { data: session } = await supabase.auth.getSession();
+      const token = session?.session?.access_token;
+      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+
+      const params = buildParams();
+      await downloadCsv(
+        `/api/admin/metrics/export-raw?${params.toString()}`,
+        token,
+        "events_raw.csv"
+      );
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setExportingRaw(false);
     }
   }
 
@@ -302,6 +323,10 @@ export default function AdminMetricsPage() {
         <button onClick={exportMailingCsv} disabled={exportingMailing}>
           {exportingMailing ? "Exportando…" : "Exportar CSV (mailing)"}
         </button>
+
+        <button onClick={exportRawEventsCsv} disabled={exportingRaw}>
+          {exportingRaw ? "Exportando…" : "Exportar CSV (eventos brutos)"}
+        </button>
       </div>
 
       {/* Atalhos de data */}
@@ -317,10 +342,7 @@ export default function AdminMetricsPage() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <span style={{ color: "#6B7280" }}>Ver:</span>
 
-        <button
-          onClick={() => setViewMode("all")}
-          style={{ fontWeight: viewMode === "all" ? 700 : 400 }}
-        >
+        <button onClick={() => setViewMode("all")} style={{ fontWeight: viewMode === "all" ? 700 : 400 }}>
           Todos
         </button>
 
