@@ -33,13 +33,19 @@ function formatLocalTime(iso: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ✅ data no formato BR (dd/mm/aaaa)
+function formatLocalDateBR(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("pt-BR");
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseClient(), []);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isLogged, setIsLogged] = useState<boolean>(false);
-  const [userEmail, setUserEmail] = useState<string>(""); // ✅ NOVO
+  const [userEmail, setUserEmail] = useState<string>("");
   const [activePass, setActivePass] = useState<PassInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +61,7 @@ export default function Home() {
 
       if (sessionErr) {
         setIsLogged(false);
-        setUserEmail(""); // ✅ NOVO
+        setUserEmail("");
         setActivePass(null);
         setError("Não consegui verificar seu login.");
         return;
@@ -66,13 +72,13 @@ export default function Home() {
 
       if (!userId) {
         setIsLogged(false);
-        setUserEmail(""); // ✅ NOVO
+        setUserEmail("");
         setActivePass(null);
         return;
       }
 
       setIsLogged(true);
-      setUserEmail(session?.user?.email || ""); // ✅ NOVO
+      setUserEmail(session?.user?.email || "");
 
       // procura passe ativo e válido
       const nowIso = new Date().toISOString();
@@ -99,14 +105,14 @@ export default function Home() {
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
       setIsLogged(false);
-      setUserEmail(""); // ✅ NOVO
+      setUserEmail("");
       setActivePass(null);
     } finally {
       setIsLoading(false);
     }
   }
 
-  // ✅ NOVO: sair/trocar email
+  // ✅ sair/trocar email
   async function logout() {
     try {
       await supabase.auth.signOut();
@@ -129,9 +135,32 @@ export default function Home() {
   const remainingMs = expiresMs ? expiresMs - nowMs : null;
   const hasActivePass = Boolean(activePass && remainingMs !== null && remainingMs > 0);
 
-  function scrollToPlans() {
-    const el = document.getElementById("passes");
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  // ✅ status helpers (bolinha + label)
+  function StatusPill({
+    color,
+    label,
+  }: {
+    color: "red" | "green";
+    label: string;
+  }) {
+    const dotColor = color === "red" ? "#D11A2A" : "#18A957";
+    const textColor = color === "red" ? "#B31222" : "#118043";
+
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            background: dotColor,
+            boxShadow: "0 0 0 3px rgba(0,0,0,0.04)",
+          }}
+        />
+        <span style={{ fontSize: 13, fontWeight: 700, color: textColor }}>{label}</span>
+      </div>
+    );
   }
 
   return (
@@ -205,37 +234,44 @@ export default function Home() {
           </button>
         </div>
 
-        {/* ✅ NOVO: mostrar email + botão sair (somente quando logado) */}
-        {isLogged && userEmail ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
-              Logado como: <b>{userEmail}</b>
-            </div>
-
-            <button
-              onClick={logout}
-              style={{
-                height: 30,
-                padding: "0 10px",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 12,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Sair / trocar e-mail
-            </button>
-          </div>
-        ) : null}
-
         {isLoading ? (
           <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
         ) : hasActivePass ? (
+          // ✅ 3) COM PASSE + COM LOGIN
           <>
+            <StatusPill color="green" label="Você está ONLINE" />
+
+            {/* email + sair */}
+            {isLogged && userEmail ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                  Logado como: <b>{userEmail}</b>
+                </div>
+
+                <button
+                  onClick={logout}
+                  style={{
+                    height: 30,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Sair / trocar e-mail
+                </button>
+              </div>
+            ) : null}
+
             <p style={{ margin: 0, lineHeight: 1.4 }}>
-              ✅ Seu passe está ativo <b>até {formatLocalTime(activePass!.expires_at)}</b>.
+              ✅ Seu passe está ativo até{" "}
+              <b>
+                {formatLocalTime(activePass!.expires_at)} do dia {formatLocalDateBR(activePass!.expires_at)}
+              </b>
+              .
             </p>
             <p style={{ margin: 0, lineHeight: 1.4, opacity: 0.85 }}>
               Faltam <b>{formatTimeLeft(remainingMs!)}</b>.
@@ -253,21 +289,49 @@ export default function Home() {
                 marginTop: 4,
               }}
             >
-              Continuar Jornada
+              ENTRAR
             </button>
 
             <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Se você fechar o app, é só voltar aqui e tocar em “Continuar Jornada”.
+              Se você fechar o app, é só voltar aqui e tocar em “ENTRAR”.
             </div>
           </>
         ) : isLogged ? (
+          // ✅ 2) SEM PASSE + COM LOGIN
           <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 800 }}>Você está logado!</div>
+                {userEmail ? (
+                  <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                    Logado como: <b>{userEmail}</b>
+                  </div>
+                ) : null}
+              </div>
+
+              <button
+                onClick={logout}
+                style={{
+                  height: 30,
+                  padding: "0 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.15)",
+                  background: "white",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Sair
+              </button>
+            </div>
+
             <p style={{ margin: 0, lineHeight: 1.4 }}>
-              Você está logado, mas <b>não tem passe ativo</b> agora.
+              Compre seu passe e acesse a experiência.
             </p>
 
             <button
-              onClick={scrollToPlans}
+              onClick={() => router.push("/login")}
               style={{
                 height: 48,
                 borderRadius: 14,
@@ -278,7 +342,7 @@ export default function Home() {
                 marginTop: 4,
               }}
             >
-              Comprar um passe
+              COMPRAR PASSE
             </button>
 
             <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
@@ -286,14 +350,16 @@ export default function Home() {
             </div>
           </>
         ) : (
+          // ✅ 1) SEM PASSE + SEM LOGIN
           <>
-            {/* ✅ MENSAGEM CORRIGIDA (não logado) */}
+            <StatusPill color="red" label="Você está OFFLINE" />
+
             <p style={{ margin: 0, lineHeight: 1.4 }}>
               Acesse a experiência com seu e-mail e compre seu passe.
             </p>
 
-            <Link
-              href="/login"
+            <button
+              onClick={() => router.push("/login")}
               style={{
                 height: 48,
                 borderRadius: 14,
@@ -302,18 +368,13 @@ export default function Home() {
                 fontSize: 16,
                 cursor: "pointer",
                 marginTop: 4,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                textDecoration: "none",
-                color: "black",
               }}
             >
-              Entrar / acessar experiência
-            </Link>
+              COMEÇAR
+            </button>
 
             <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Depois de entrar, você pode comprar um passe e o app reconhece seu acesso.
+              Você não será cobrado ao entrar — isso só serve para o app reconhecer seu acesso.
             </div>
           </>
         )}
@@ -324,53 +385,6 @@ export default function Home() {
           </div>
         )}
       </div>
-
-      {/* 4) Planos pagos */}
-      <div id="passes" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>Escolha seu passe</h2>
-
-        <PlanButton href="/login?plano=1h" title="1 hora" subtitle="Acesso por 60 minutos" />
-        <PlanButton href="/login?plano=2h" title="2 horas" subtitle="Acesso por 120 minutos" />
-        <PlanButton href="/login?plano=day" title="Dia todo" subtitle="Acesso por 24 horas" />
-      </div>
-
-      {/* Login opcional (pequeno) */}
-      <div style={{ marginTop: 4, textAlign: "center" }}>
-        <Link href="/login" style={{ fontSize: 13, textDecoration: "none" }}>
-          Já tenho conta / entrar
-        </Link>
-      </div>
     </main>
-  );
-}
-
-function PlanButton({
-  href,
-  title,
-  subtitle,
-}: {
-  href: string;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <Link
-      href={href}
-      style={{
-        height: 64,
-        borderRadius: 16,
-        border: "1px solid rgba(0,0,0,0.15)",
-        background: "white",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        padding: "0 16px",
-        textDecoration: "none",
-        color: "black",
-      }}
-    >
-      <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
-      <div style={{ fontSize: 13, opacity: 0.75 }}>{subtitle}</div>
-    </Link>
   );
 }
