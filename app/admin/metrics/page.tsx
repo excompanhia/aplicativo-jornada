@@ -30,9 +30,20 @@ export default function AdminMetricsPage() {
   const [exp, setExp] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<MetricsResponse | null>(null);
+
+  function buildParams() {
+    const params = new URLSearchParams();
+    if (exp) params.set("exp", exp);
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+    return params;
+  }
 
   async function load() {
     setError(null);
@@ -49,19 +60,14 @@ export default function AdminMetricsPage() {
         return;
       }
 
-      const params = new URLSearchParams();
-      if (exp) params.set("exp", exp);
-      if (from) params.set("from", from);
-      if (to) params.set("to", to);
+      const params = buildParams();
 
-      const res = await fetch(
-        `/api/admin/metrics?${params.toString()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const res = await fetch(`/api/admin/metrics?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
 
       const json = await res.json();
       if (!res.ok || !json.ok) {
@@ -78,14 +84,67 @@ export default function AdminMetricsPage() {
     }
   }
 
+  async function exportCsv() {
+    setError(null);
+    setExporting(true);
+
+    try {
+      const supabase = getSupabaseClient();
+      const { data: session } = await supabase.auth.getSession();
+
+      const token = session?.session?.access_token;
+      if (!token) {
+        setError("Sessão inválida. Faça login novamente no admin.");
+        setExporting(false);
+        return;
+      }
+
+      const params = buildParams();
+
+      const res = await fetch(`/api/admin/metrics/export?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const maybeJson = await res.json().catch(() => null);
+        setError(maybeJson?.error || "Erro ao exportar CSV.");
+        setExporting(false);
+        return;
+      }
+
+      const blob = await res.blob();
+
+      // tenta extrair filename do header
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] || "metrics.csv";
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <main style={{ padding: 24, maxWidth: 900 }}>
-      <h1>Admin · Métricas</h1>
+    <main style={{ padding: 24 }}>
+      <h1 style={{ marginTop: 0 }}>Admin · Métricas</h1>
 
       {/* Filtros */}
       <div
@@ -94,25 +153,44 @@ export default function AdminMetricsPage() {
           gap: 12,
           flexWrap: "wrap",
           marginBottom: 16,
+          alignItems: "center",
         }}
       >
         <input
           placeholder="experience_id"
           value={exp}
           onChange={(e) => setExp(e.target.value)}
+          style={{ padding: "8px 10px" }}
         />
         <input
           type="date"
           value={from}
           onChange={(e) => setFrom(e.target.value)}
+          style={{ padding: "8px 10px" }}
         />
         <input
           type="date"
           value={to}
           onChange={(e) => setTo(e.target.value)}
+          style={{ padding: "8px 10px" }}
         />
-        <button onClick={load} disabled={loading}>
+
+        <button onClick={load} disabled={loading} style={{ padding: "9px 12px" }}>
           {loading ? "Carregando…" : "Aplicar filtros"}
+        </button>
+
+        <button
+          onClick={exportCsv}
+          disabled={exporting}
+          style={{
+            padding: "9px 12px",
+            border: "1px solid #111827",
+            background: "#111827",
+            color: "#fff",
+            borderRadius: 8,
+          }}
+        >
+          {exporting ? "Exportando…" : "Exportar CSV (métricas)"}
         </button>
       </div>
 
@@ -143,20 +221,12 @@ export default function AdminMetricsPage() {
             </div>
             <div>
               <b>Conversão</b>
-              <div>
-                {data.totals.conversion_percent ?? 0}
-                %
-              </div>
+              <div>{data.totals.conversion_percent ?? 0}%</div>
             </div>
           </div>
 
           {/* Tabela por dia */}
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-            }}
-          >
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th align="left">Dia</th>
