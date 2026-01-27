@@ -46,7 +46,6 @@ export default function AdminLayout({
   const [loggingOut, setLoggingOut] = useState<boolean>(false);
 
   useEffect(() => {
-    // Só pra decidir se mostramos o botão "Sair"
     (async () => {
       const { data } = await supabase.auth.getSession();
       setHasSession(Boolean(data.session));
@@ -71,14 +70,18 @@ export default function AdminLayout({
     <div className="min-h-screen bg-neutral-50 text-neutral-900">
       {/* Top bar */}
       <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
+        <div className="flex w-full items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="rounded-lg border border-neutral-200 bg-white px-2 py-1 text-sm font-semibold">
-              Jornada Admin
+              ADMIN
             </div>
 
             <nav className="flex items-center gap-2">
-              <TabLink href="/admin/metrics" label="Métricas" active={!!isMetrics} />
+              <TabLink
+                href="/admin/metrics"
+                label="Métricas"
+                active={!!isMetrics}
+              />
               <TabLink href="/admin/pwa" label="Layout PWA" active={!!isPwa} />
             </nav>
           </div>
@@ -104,14 +107,10 @@ export default function AdminLayout({
         </div>
       </header>
 
-      {/* Content */}
-      <main className="mx-auto w-full max-w-6xl px-4 py-6">
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          {children}
-        </div>
-      </main>
+      {/* Content: FULL WIDTH, sem "card" embrulhando */}
+      <main className="w-full px-4 py-6">{children}</main>
 
-      <footer className="mx-auto w-full max-w-6xl px-4 pb-10 text-xs text-neutral-500">
+      <footer className="w-full px-4 pb-10 text-xs text-neutral-500">
         Admin do Aplicativo Jornada • Em produção só após deploy Vercel
       </footer>
     </div>
