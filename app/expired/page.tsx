@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 function getLastExpFallback(): string {
   try {
@@ -13,13 +13,15 @@ function getLastExpFallback(): string {
 
 export default function ExpiredPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [exp, setExp] = useState<string>("");
 
-  const exp = useMemo(() => {
-    const fromUrl = (searchParams.get("exp") || "").trim();
-    if (fromUrl) return fromUrl;
-    return getLastExpFallback();
-  }, [searchParams]);
+  useEffect(() => {
+    // ✅ não usa useSearchParams (evita erro de prerender)
+    const sp = new URLSearchParams(window.location.search);
+    const fromUrl = (sp.get("exp") || "").trim();
+    const finalExp = fromUrl || getLastExpFallback();
+    setExp(finalExp);
+  }, []);
 
   function goCheckout(plano: "1h" | "2h" | "day") {
     const url = exp
@@ -54,7 +56,7 @@ export default function ExpiredPage() {
           color: "#111827",
         }}
       >
-        Experiência: <b>{exp || "não definida"}</b>
+        Experiência: <b>{exp || "carregando…"}</b>
       </div>
 
       <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
