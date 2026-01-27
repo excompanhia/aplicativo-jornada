@@ -1,92 +1,110 @@
 "use client";
 
-import Link from "next/link";
+import { useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
+function getLastExpFallback(): string {
+  try {
+    return localStorage.getItem("jornada:last_exp") || "";
+  } catch {
+    return "";
+  }
+}
 
 export default function ExpiredPage() {
-  return (
-    <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      <h1 style={{ margin: 0 }}>Passe expirou</h1>
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-      <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.35 }}>
-        Seu acesso terminou. Para continuar a experiência, escolha um novo passe.
+  const exp = useMemo(() => {
+    const fromUrl = (searchParams.get("exp") || "").trim();
+    if (fromUrl) return fromUrl;
+    return getLastExpFallback();
+  }, [searchParams]);
+
+  function goCheckout(plano: "1h" | "2h" | "day") {
+    const url = exp
+      ? `/checkout?plano=${plano}&exp=${encodeURIComponent(exp)}`
+      : `/checkout?plano=${plano}`;
+    router.push(url);
+  }
+
+  return (
+    <main
+      style={{
+        padding: 24,
+        fontFamily: "system-ui, sans-serif",
+        maxWidth: 520,
+        margin: "0 auto",
+      }}
+    >
+      <h1 style={{ margin: 0, fontSize: 26 }}>Passe expirado</h1>
+
+      <p style={{ marginTop: 10, color: "#374151", lineHeight: 1.4 }}>
+        Você não tem um passe ativo no momento.
+      </p>
+
+      <div
+        style={{
+          marginTop: 12,
+          padding: 12,
+          borderRadius: 12,
+          border: "1px solid rgba(0,0,0,0.12)",
+          background: "rgba(0,0,0,0.03)",
+          fontSize: 13,
+          color: "#111827",
+        }}
+      >
+        Experiência: <b>{exp || "não definida"}</b>
       </div>
 
-      <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
-        <div style={{ fontSize: 13, opacity: 0.75 }}>Escolher passe</div>
+      <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+        <button
+          type="button"
+          onClick={() => goCheckout("1h")}
+          style={{
+            width: "100%",
+            height: 52,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "white",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          Comprar 1 hora — R$ 14,90
+        </button>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-          <Link
-            href="/?scroll=planos"
-            style={{
-              height: 52,
-              borderRadius: 16,
-              border: "1px solid rgba(0,0,0,0.15)",
-              fontSize: 16,
-              background: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textDecoration: "none",
-              color: "black",
-            }}
-          >
-            Voltar para a landing (planos)
-          </Link>
+        <button
+          type="button"
+          onClick={() => goCheckout("2h")}
+          style={{
+            width: "100%",
+            height: 52,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "white",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          Comprar 2 horas — R$ 19,90
+        </button>
 
-          <Link
-            href="/checkout?plano=1h"
-            style={{
-              height: 52,
-              borderRadius: 16,
-              border: "1px solid rgba(0,0,0,0.15)",
-              fontSize: 16,
-              background: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textDecoration: "none",
-              color: "black",
-            }}
-          >
-            Comprar 1 hora
-          </Link>
-
-          <Link
-            href="/checkout?plano=2h"
-            style={{
-              height: 52,
-              borderRadius: 16,
-              border: "1px solid rgba(0,0,0,0.15)",
-              fontSize: 16,
-              background: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textDecoration: "none",
-              color: "black",
-            }}
-          >
-            Comprar 2 horas
-          </Link>
-
-          <Link
-            href="/checkout?plano=day"
-            style={{
-              height: 52,
-              borderRadius: 16,
-              border: "1px solid rgba(0,0,0,0.15)",
-              fontSize: 16,
-              background: "white",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textDecoration: "none",
-              color: "black",
-            }}
-          >
-            Comprar 24 horas
-          </Link>
-        </div>
+        <button
+          type="button"
+          onClick={() => goCheckout("day")}
+          style={{
+            width: "100%",
+            height: 52,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "white",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          Comprar 24 horas — R$ 29,90
+        </button>
       </div>
     </main>
   );
