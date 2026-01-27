@@ -66,6 +66,9 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const [pass, setPass] = useState<PassRow | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
 
+  // ✅ NOVO: mostrar "logado como: ..."
+  const [userEmail, setUserEmail] = useState<string>("");
+
   const warnedRef = useRef(false);
   const tickRef = useRef<number | null>(null);
 
@@ -113,6 +116,9 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       router.replace("/login");
       return;
     }
+
+    // ✅ NOVO: guarda email para mostrar no app
+    setUserEmail(session.user?.email || "");
 
     const token = session.access_token;
 
@@ -296,9 +302,18 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
             borderRadius: 999,
             padding: "8px 12px",
             fontSize: 13,
+            textAlign: "center",
+            lineHeight: 1.25,
           }}
         >
-          Tempo restante: <b>{formatMMSS(remainingSeconds)}</b>
+          {userEmail ? (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Logado como: <b>{userEmail}</b>
+            </div>
+          ) : null}
+          <div>
+            Tempo restante: <b>{formatMMSS(remainingSeconds)}</b>
+          </div>
         </div>
       </div>
 
@@ -331,14 +346,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
               Renovar seu plano com 50% de desconto!
             </div>
 
-            <div
-              style={{
-                marginTop: 8,
-                fontSize: 14,
-                opacity: 0.85,
-                lineHeight: 1.35,
-              }}
-            >
+            <div style={{ marginTop: 8, fontSize: 14, opacity: 0.85, lineHeight: 1.35 }}>
               Faltam 5 minutos para terminar seu acesso.
             </div>
 
@@ -349,19 +357,10 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
             )}
 
             {error && (
-              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>
-                {error}
-              </div>
+              <div style={{ marginTop: 10, fontSize: 13, color: "crimson" }}>{error}</div>
             )}
 
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                marginTop: 14,
-              }}
-            >
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
               <button
                 type="button"
                 onClick={renewSamePlanHalfCheckout}
