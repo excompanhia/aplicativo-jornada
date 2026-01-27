@@ -39,6 +39,16 @@ function formatLocalDateBR(iso: string) {
   return d.toLocaleDateString("pt-BR");
 }
 
+// ✅ pegar exp atual para mandar para /expired?exp=...
+function getExpForPurchase(): string {
+  try {
+    if (typeof window === "undefined") return "audiowalk1";
+    return localStorage.getItem("jornada:last_exp") || "audiowalk1";
+  } catch {
+    return "audiowalk1";
+  }
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseClient(), []);
@@ -140,11 +150,13 @@ export default function Home() {
     color,
     label,
   }: {
-    color: "red" | "green";
+    color: "red" | "yellow" | "green";
     label: string;
   }) {
-    const dotColor = color === "red" ? "#D11A2A" : "#18A957";
-    const textColor = color === "red" ? "#B31222" : "#118043";
+    const dotColor =
+      color === "red" ? "#D11A2A" : color === "yellow" ? "#F4B400" : "#18A957";
+    const textColor =
+      color === "red" ? "#B31222" : color === "yellow" ? "#9A6B00" : "#118043";
 
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -241,7 +253,6 @@ export default function Home() {
           <>
             <StatusPill color="green" label="Você está ONLINE" />
 
-            {/* email + sair */}
             {isLogged && userEmail ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                 <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
@@ -299,39 +310,42 @@ export default function Home() {
         ) : isLogged ? (
           // ✅ 2) SEM PASSE + COM LOGIN
           <>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontSize: 13, fontWeight: 800 }}>Você está logado!</div>
-                {userEmail ? (
-                  <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
-                    Logado como: <b>{userEmail}</b>
-                  </div>
-                ) : null}
-              </div>
+            <StatusPill color="yellow" label="VOCÊ ESTÁ LOGADO mas SEM PASSE VÁLIDO" />
 
-              <button
-                onClick={logout}
-                style={{
-                  height: 30,
-                  padding: "0 10px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  background: "white",
-                  fontSize: 12,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Sair
-              </button>
-            </div>
+            {userEmail ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                  Logado como: <b>{userEmail}</b>
+                </div>
+
+                <button
+                  onClick={logout}
+                  style={{
+                    height: 30,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Sair
+                </button>
+              </div>
+            ) : null}
 
             <p style={{ margin: 0, lineHeight: 1.4 }}>
               Compre seu passe e acesse a experiência.
             </p>
 
+            {/* ✅ AJUSTE: ir para a página de compra (expired) no contexto da experiência */}
             <button
-              onClick={() => router.push("/login")}
+              onClick={() => {
+                const exp = getExpForPurchase();
+                router.push(`/expired?exp=${encodeURIComponent(exp)}`);
+              }}
               style={{
                 height: 48,
                 borderRadius: 14,
@@ -344,10 +358,6 @@ export default function Home() {
             >
               COMPRAR PASSE
             </button>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Dica: se você acha que já pagou, toque em “Atualizar” acima.
-            </div>
           </>
         ) : (
           // ✅ 1) SEM PASSE + SEM LOGIN
