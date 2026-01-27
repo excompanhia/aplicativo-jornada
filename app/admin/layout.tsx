@@ -10,7 +10,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-function TabLink({
+function Tab({
   href,
   label,
   active,
@@ -22,12 +22,18 @@ function TabLink({
   return (
     <Link
       href={href}
-      className={[
-        "rounded-md px-3 py-2 text-sm transition",
-        active
-          ? "bg-neutral-900 text-white"
-          : "text-neutral-700 hover:bg-neutral-100",
-      ].join(" ")}
+      style={{
+        textDecoration: "none",
+        color: active ? "#111827" : "#6B7280",
+        fontSize: 14,
+        padding: "12px 10px",
+        borderBottom: active ? "2px solid #111827" : "2px solid transparent",
+        marginBottom: -1,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontWeight: active ? 600 : 500,
+      }}
     >
       {label}
     </Link>
@@ -42,8 +48,8 @@ export default function AdminLayout({
   const pathname = usePathname();
   const router = useRouter();
 
-  const [hasSession, setHasSession] = useState<boolean>(false);
-  const [loggingOut, setLoggingOut] = useState<boolean>(false);
+  const [hasSession, setHasSession] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -67,29 +73,63 @@ export default function AdminLayout({
   const isPwa = pathname?.startsWith("/admin/pwa");
 
   return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      {/* Top bar */}
-      <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white/80 backdrop-blur">
-        <div className="flex w-full items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg border border-neutral-200 bg-white px-2 py-1 text-sm font-semibold">
+    <div style={{ minHeight: "100vh", background: "#fff", color: "#111827" }}>
+      {/* Top bar (estilo Vercel) */}
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          background: "rgba(255,255,255,0.9)",
+          backdropFilter: "blur(10px)",
+          borderBottom: "1px solid #E5E7EB",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            gap: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+              }}
+            >
               ADMIN
             </div>
 
-            <nav className="flex items-center gap-2">
-              <TabLink
-                href="/admin/metrics"
-                label="Métricas"
-                active={!!isMetrics}
-              />
-              <TabLink href="/admin/pwa" label="Layout PWA" active={!!isPwa} />
+            <nav
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                borderBottom: "1px solid #E5E7EB",
+              }}
+            >
+              <Tab href="/admin/metrics" label="Métricas" active={!!isMetrics} />
+              <Tab href="/admin/pwa" label="Layout PWA" active={!!isPwa} />
             </nav>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Link
               href="/admin/login"
-              className="rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
+              style={{
+                textDecoration: "none",
+                fontSize: 14,
+                color: "#111827",
+                padding: "8px 10px",
+                border: "1px solid #E5E7EB",
+                borderRadius: 8,
+                background: "#fff",
+              }}
             >
               Login
             </Link>
@@ -98,7 +138,16 @@ export default function AdminLayout({
               <button
                 onClick={logout}
                 disabled={loggingOut}
-                className="rounded-md bg-neutral-900 px-3 py-2 text-sm text-white hover:bg-neutral-800 disabled:opacity-60"
+                style={{
+                  fontSize: 14,
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #111827",
+                  background: "#111827",
+                  color: "#fff",
+                  cursor: loggingOut ? "default" : "pointer",
+                  opacity: loggingOut ? 0.7 : 1,
+                }}
               >
                 {loggingOut ? "Saindo…" : "Sair"}
               </button>
@@ -107,10 +156,10 @@ export default function AdminLayout({
         </div>
       </header>
 
-      {/* Content: FULL WIDTH, sem "card" embrulhando */}
-      <main className="w-full px-4 py-6">{children}</main>
+      {/* Conteúdo */}
+      <main style={{ padding: "24px 20px" }}>{children}</main>
 
-      <footer className="w-full px-4 pb-10 text-xs text-neutral-500">
+      <footer style={{ padding: "0 20px 24px", fontSize: 12, color: "#6B7280" }}>
         Admin do Aplicativo Jornada • Em produção só após deploy Vercel
       </footer>
     </div>
