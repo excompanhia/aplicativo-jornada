@@ -161,7 +161,6 @@ export default function AdminMetricsPage() {
       return data.byDay.filter((d) => (d.purchase ?? 0) > 0);
     }
 
-    // not_bought: entrou e não comprou
     return data.byDay.filter((d) => (d.qr_open ?? 0) > 0 && (d.purchase ?? 0) === 0);
   }, [data, viewMode]);
 
@@ -177,7 +176,6 @@ export default function AdminMetricsPage() {
 
       const params = buildParams();
 
-      // CSV agregado respeita o filtro "Ver"
       if (viewMode === "all") {
         await downloadCsv(`/api/admin/metrics/export?${params.toString()}`, token, "metrics.csv");
         return;
@@ -265,11 +263,7 @@ export default function AdminMetricsPage() {
       if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
-      await downloadCsv(
-        `/api/admin/metrics/export-raw?${params.toString()}`,
-        token,
-        "events_raw.csv"
-      );
+      await downloadCsv(`/api/admin/metrics/export-raw?${params.toString()}`, token, "events_raw.csv");
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -284,138 +278,296 @@ export default function AdminMetricsPage() {
     setTimeout(load, 0);
   }
 
+  // UI helpers
+  const Card = ({
+    label,
+    value,
+    hint,
+  }: {
+    label: string;
+    value: string | number;
+    hint?: string;
+  }) => (
+    <div
+      style={{
+        border: "1px solid rgba(0,0,0,0.10)",
+        borderRadius: 12,
+        padding: 14,
+        background: "#fff",
+        minWidth: 180,
+      }}
+    >
+      <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700, letterSpacing: 0.2 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6 }}>{value}</div>
+      {hint ? <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{hint}</div> : null}
+    </div>
+  );
+
+  const chipStyle = (active: boolean) => ({
+    padding: "8px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: active ? "#111827" : "#fff",
+    color: active ? "#fff" : "#111827",
+    fontWeight: active ? 800 : 500,
+    cursor: "pointer",
+  });
+
+  const buttonPrimary = (disabled?: boolean) => ({
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid #111827",
+    background: disabled ? "#111827" : "#111827",
+    color: "#fff",
+    opacity: disabled ? 0.7 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  });
+
+  const buttonGhost = (disabled?: boolean) => ({
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "#fff",
+    color: "#111827",
+    opacity: disabled ? 0.7 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  });
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1 style={{ marginTop: 0 }}>Admin · Métricas</h1>
-
-      {/* Filtros */}
-      <div
+    <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      {/* Header */}
+      <header
         style={{
           display: "flex",
+          justifyContent: "space-between",
           gap: 12,
-          flexWrap: "wrap",
-          marginBottom: 12,
-          alignItems: "center",
+          alignItems: "flex-start",
+          marginBottom: 16,
         }}
       >
-        <input
-          placeholder="experience_id"
-          value={exp}
-          onChange={(e) => setExp(e.target.value)}
-          style={{ padding: "8px 10px" }}
-        />
-        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        <div>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>
+            ADMIN
+          </div>
+          <h1 style={{ margin: "6px 0 0", fontSize: 28 }}>Métricas</h1>
+          <div style={{ marginTop: 6, color: "#6B7280" }}>
+            Entraram × Compraram (por período e experience_id)
+          </div>
+        </div>
 
-        <button onClick={load} disabled={loading}>
-          {loading ? "Carregando…" : "Aplicar filtros"}
-        </button>
-
-        <button onClick={exportMetricsCsv} disabled={exportingMetrics}>
-          {exportingMetrics ? "Exportando…" : "Exportar CSV (métricas)"}
-        </button>
-
-        <button onClick={exportMailingCsv} disabled={exportingMailing}>
-          {exportingMailing ? "Exportando…" : "Exportar CSV (mailing)"}
-        </button>
-
-        <button onClick={exportRawEventsCsv} disabled={exportingRaw}>
-          {exportingRaw ? "Exportando…" : "Exportar CSV (eventos brutos)"}
-        </button>
-      </div>
-
-      {/* Atalhos de data */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <button onClick={() => applyRange(todayISO(), todayISO())}>Hoje</button>
-        <button onClick={() => applyRange(daysAgoISO(6), todayISO())}>Últimos 7 dias</button>
-        <button onClick={() => applyRange(daysAgoISO(29), todayISO())}>Últimos 30 dias</button>
-        <button onClick={() => applyRange(startOfMonthISO(), todayISO())}>Este mês</button>
-        <button onClick={() => applyRange(startOfYearISO(), todayISO())}>Este ano</button>
-      </div>
-
-      {/* Filtro de conversão (tabela/CSV agregado) */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <span style={{ color: "#6B7280" }}>Ver:</span>
-
-        <button onClick={() => setViewMode("all")} style={{ fontWeight: viewMode === "all" ? 700 : 400 }}>
-          Todos
-        </button>
-
-        <button
-          onClick={() => setViewMode("bought")}
-          style={{ fontWeight: viewMode === "bought" ? 700 : 400 }}
+        <div
+          style={{
+            border: "1px solid rgba(0,0,0,0.10)",
+            borderRadius: 12,
+            padding: 12,
+            background: "#fff",
+            minWidth: 320,
+          }}
         >
-          Comprou
-        </button>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>
+            EXPORTAR
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <button style={buttonPrimary(exportingMetrics)} onClick={exportMetricsCsv} disabled={exportingMetrics}>
+              {exportingMetrics ? "Exportando…" : "CSV Métricas"}
+            </button>
+            <button style={buttonGhost(exportingMailing)} onClick={exportMailingCsv} disabled={exportingMailing}>
+              {exportingMailing ? "Exportando…" : "CSV Mailing"}
+            </button>
+            <button style={buttonGhost(exportingRaw)} onClick={exportRawEventsCsv} disabled={exportingRaw}>
+              {exportingRaw ? "Exportando…" : "CSV Eventos brutos"}
+            </button>
+          </div>
+        </div>
+      </header>
 
-        <button
-          onClick={() => setViewMode("not_bought")}
-          style={{ fontWeight: viewMode === "not_bought" ? 700 : 400 }}
-        >
-          Não comprou
-        </button>
-      </div>
+      {/* Filtros */}
+      <section
+        style={{
+          border: "1px solid rgba(0,0,0,0.10)",
+          borderRadius: 14,
+          padding: 14,
+          background: "#F9FAFB",
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700 }}>experience_id</div>
+            <input
+              placeholder="ex: teste_01"
+              value={exp}
+              onChange={(e) => setExp(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.14)",
+                minWidth: 220,
+                background: "#fff",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700 }}>de</div>
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.14)",
+                background: "#fff",
+              }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 700 }}>até</div>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.14)",
+                background: "#fff",
+              }}
+            />
+          </div>
+
+          <button style={buttonPrimary(loading)} onClick={load} disabled={loading}>
+            {loading ? "Carregando…" : "Aplicar"}
+          </button>
+        </div>
+
+        {/* Atalhos */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <button style={buttonGhost(false)} onClick={() => applyRange(todayISO(), todayISO())}>
+            Hoje
+          </button>
+          <button style={buttonGhost(false)} onClick={() => applyRange(daysAgoISO(6), todayISO())}>
+            Últimos 7 dias
+          </button>
+          <button style={buttonGhost(false)} onClick={() => applyRange(daysAgoISO(29), todayISO())}>
+            Últimos 30 dias
+          </button>
+          <button style={buttonGhost(false)} onClick={() => applyRange(startOfMonthISO(), todayISO())}>
+            Este mês
+          </button>
+          <button style={buttonGhost(false)} onClick={() => applyRange(startOfYearISO(), todayISO())}>
+            Este ano
+          </button>
+        </div>
+
+        {/* Ver */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 800, letterSpacing: 0.2 }}>VER</div>
+          <button style={chipStyle(viewMode === "all")} onClick={() => setViewMode("all")}>
+            Todos
+          </button>
+          <button style={chipStyle(viewMode === "bought")} onClick={() => setViewMode("bought")}>
+            Comprou
+          </button>
+          <button style={chipStyle(viewMode === "not_bought")} onClick={() => setViewMode("not_bought")}>
+            Não comprou
+          </button>
+        </div>
+      </section>
 
       {error && (
-        <div style={{ color: "crimson", marginBottom: 16 }}>
+        <div
+          style={{
+            border: "1px solid rgba(220, 38, 38, 0.35)",
+            background: "rgba(220, 38, 38, 0.08)",
+            borderRadius: 12,
+            padding: 12,
+            color: "#991B1B",
+            marginBottom: 16,
+          }}
+        >
           <b>Erro:</b> {error}
         </div>
       )}
 
       {data && (
         <>
-          {/* Totais — SEMPRE refletem o período selecionado */}
-          <div style={{ display: "flex", gap: 24, marginBottom: 18, flexWrap: "wrap" }}>
-            <div>
-              <b>Entraram</b>
-              <div>{data.totals.qr_open}</div>
-            </div>
-            <div>
-              <b>Compraram</b>
-              <div>{data.totals.purchase}</div>
-            </div>
-            <div>
-              <b>Conversão</b>
-              <div>{data.totals.conversion_percent ?? 0}%</div>
-            </div>
+          {/* Cards */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <Card label="ENTRARAM" value={data.totals.qr_open} hint="no período selecionado" />
+            <Card label="COMPRARAM" value={data.totals.purchase} hint="no período selecionado" />
+            <Card
+              label="CONVERSÃO"
+              value={`${data.totals.conversion_percent ?? 0}%`}
+              hint="compras / entradas"
+            />
+            <Card label="LINHAS (TABELA)" value={filteredByDay.length} hint="após filtro VER" />
           </div>
 
-          <div style={{ color: "#6B7280", marginBottom: 10 }}>
-            Linhas na tabela (após filtro “Ver”): <b>{filteredByDay.length}</b>
+          {/* Tabela */}
+          <div
+            style={{
+              border: "1px solid rgba(0,0,0,0.10)",
+              borderRadius: 14,
+              overflowX: "auto",
+              background: "#fff",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+              <thead>
+                <tr style={{ background: "#F9FAFB" }}>
+                  <th
+                    align="left"
+                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
+                  >
+                    DIA
+                  </th>
+                  <th
+                    align="right"
+                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
+                  >
+                    ENTRARAM
+                  </th>
+                  <th
+                    align="right"
+                    style={{ padding: 12, fontSize: 12, color: "#6B7280", letterSpacing: 0.2 }}
+                  >
+                    COMPRARAM
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredByDay.map((d) => (
+                  <tr key={d.day} style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                    <td style={{ padding: 12 }}>{d.day}</td>
+                    <td style={{ padding: 12 }} align="right">
+                      {d.qr_open}
+                    </td>
+                    <td style={{ padding: 12 }} align="right">
+                      {d.purchase}
+                    </td>
+                  </tr>
+                ))}
+
+                {filteredByDay.length === 0 && (
+                  <tr>
+                    <td colSpan={3} style={{ padding: 14, color: "#6B7280" }}>
+                      Nenhum dia corresponde a este filtro.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-
-          {/* Tabela por dia (filtrada) */}
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th align="left">Dia</th>
-                <th align="right">Entraram</th>
-                <th align="right">Compraram</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredByDay.map((d) => (
-                <tr key={d.day}>
-                  <td>{d.day}</td>
-                  <td align="right">{d.qr_open}</td>
-                  <td align="right">{d.purchase}</td>
-                </tr>
-              ))}
-
-              {filteredByDay.length === 0 && (
-                <tr>
-                  <td colSpan={3} style={{ padding: 12, color: "#6B7280" }}>
-                    Nenhum dia corresponde a este filtro.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         </>
       )}
     </main>
