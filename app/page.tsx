@@ -39,7 +39,7 @@ export default function Home() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isLogged, setIsLogged] = useState<boolean>(false);
-  const [userEmail, setUserEmail] = useState<string>(""); // ✅ NOVO
+  const [userEmail, setUserEmail] = useState<string>("");
   const [activePass, setActivePass] = useState<PassInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,11 +51,12 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
 
       if (sessionErr) {
         setIsLogged(false);
-        setUserEmail(""); // ✅ NOVO
+        setUserEmail("");
         setActivePass(null);
         setError("Não consegui verificar seu login.");
         return;
@@ -66,13 +67,13 @@ export default function Home() {
 
       if (!userId) {
         setIsLogged(false);
-        setUserEmail(""); // ✅ NOVO
+        setUserEmail("");
         setActivePass(null);
         return;
       }
 
       setIsLogged(true);
-      setUserEmail(session?.user?.email || ""); // ✅ NOVO
+      setUserEmail(session?.user?.email || "");
 
       // procura passe ativo e válido
       const nowIso = new Date().toISOString();
@@ -92,18 +93,29 @@ export default function Home() {
       }
 
       if (data && data.length > 0 && data[0]?.expires_at) {
-        setActivePass({ id: data[0].id, expires_at: data[0].expires_at });
+        setActivePass({
+          id: data[0].id,
+          expires_at: data[0].expires_at,
+        });
       } else {
         setActivePass(null);
       }
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
       setIsLogged(false);
-      setUserEmail(""); // ✅ NOVO
+      setUserEmail("");
       setActivePass(null);
     } finally {
       setIsLoading(false);
     }
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    setIsLogged(false);
+    setUserEmail("");
+    setActivePass(null);
+    router.replace("/");
   }
 
   useEffect(() => {
@@ -113,9 +125,13 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const expiresMs = activePass?.expires_at ? new Date(activePass.expires_at).getTime() : null;
+  const expiresMs = activePass?.expires_at
+    ? new Date(activePass.expires_at).getTime()
+    : null;
   const remainingMs = expiresMs ? expiresMs - nowMs : null;
-  const hasActivePass = Boolean(activePass && remainingMs !== null && remainingMs > 0);
+  const hasActivePass = Boolean(
+    activePass && remainingMs !== null && remainingMs > 0
+  );
 
   function scrollToPlans() {
     const el = document.getElementById("passes");
@@ -124,91 +140,59 @@ export default function Home() {
 
   return (
     <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* 1) Apresentação curta */}
-      <div
-        style={{
-          borderRadius: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.15)",
-        }}
-      >
-        <h1 style={{ fontSize: 22, margin: 0, lineHeight: 1.2 }}>Jornada</h1>
-        <p style={{ margin: "10px 0 0 0", lineHeight: 1.4 }}>
-          Uma experiência por estações: imagens em movimento, texto e áudio. Você pode experimentar grátis e, se quiser,
-          comprar um passe de acesso temporário.
+      {/* Apresentação */}
+      <div style={{ borderRadius: 16, padding: 16, border: "1px solid rgba(0,0,0,0.15)" }}>
+        <h1 style={{ fontSize: 22, margin: 0 }}>Jornada</h1>
+        <p style={{ marginTop: 8 }}>
+          Uma experiência por estações: imagens, texto e áudio.
         </p>
       </div>
 
-      {/* 2) Experiência grátis */}
+      {/* STATUS / ACESSO */}
       <div
         style={{
           borderRadius: 16,
           padding: 16,
           border: "1px solid rgba(0,0,0,0.15)",
-        }}
-      >
-        <h2 style={{ fontSize: 16, margin: 0 }}>Experimente (grátis)</h2>
-        <p style={{ margin: "8px 0 12px 0", lineHeight: 1.4 }}>
-          Um trecho curto para você sentir o ritmo da experiência.
-        </p>
-
-        <audio controls style={{ width: "100%" }}>
-          <source src="/sample.mp3" type="audio/mpeg" />
-          Seu navegador não conseguiu tocar o áudio.
-        </audio>
-
-        <p style={{ margin: "10px 0 0 0", fontSize: 12, opacity: 0.75, lineHeight: 1.3 }}>
-          (Por enquanto este áudio é um “arquivo exemplo”. Depois vamos trocar pelo seu.)
-        </p>
-      </div>
-
-      {/* ✅ 3) BLOCO ÚNICO: status do passe / continuar / recuperar */}
-      <div
-        style={{
-          borderRadius: 16,
-          padding: 16,
-          border: "1px solid rgba(0,0,0,0.15)",
-          background: "white",
           display: "flex",
           flexDirection: "column",
           gap: 10,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <h2 style={{ fontSize: 16, margin: 0 }}>Seu acesso</h2>
+        <h2 style={{ fontSize: 16, margin: 0 }}>Seu acesso</h2>
 
-          <button
-            onClick={checkStatus}
-            style={{
-              height: 34,
-              padding: "0 12px",
-              borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "white",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Atualizar
-          </button>
-        </div>
+        {isLogged && userEmail && (
+          <>
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Logado como: <b>{userEmail}</b>
+            </div>
 
-        {/* ✅ NOVO: mostrar email na landing (aba de status) */}
-        {isLogged && userEmail ? (
-          <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
-            Logado como: <b>{userEmail}</b>
-          </div>
-        ) : null}
+            <button
+              onClick={logout}
+              style={{
+                alignSelf: "flex-start",
+                padding: "6px 10px",
+                borderRadius: 10,
+                border: "1px solid rgba(0,0,0,0.15)",
+                background: "white",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Sair / trocar e-mail
+            </button>
+          </>
+        )}
 
         {isLoading ? (
-          <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
+          <p>Verificando acesso…</p>
         ) : hasActivePass ? (
           <>
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              ✅ Seu passe está ativo <b>até {formatLocalTime(activePass!.expires_at)}</b>.
+            <p>
+              ✅ Passe ativo até <b>{formatLocalTime(activePass!.expires_at)}</b>
             </p>
-            <p style={{ margin: 0, lineHeight: 1.4, opacity: 0.85 }}>
-              Faltam <b>{formatTimeLeft(remainingMs!)}</b>.
+            <p>
+              Faltam <b>{formatTimeLeft(remainingMs!)}</b>
             </p>
 
             <button
@@ -220,126 +204,35 @@ export default function Home() {
                 background: "white",
                 fontSize: 16,
                 cursor: "pointer",
-                marginTop: 4,
               }}
             >
               Continuar Jornada
             </button>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Se você fechar o app, é só voltar aqui e tocar em “Continuar Jornada”.
-            </div>
           </>
         ) : isLogged ? (
           <>
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              Você está logado, mas <b>não tem passe ativo</b> agora.
-            </p>
-
-            <button
-              onClick={scrollToPlans}
-              style={{
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 16,
-                cursor: "pointer",
-                marginTop: 4,
-              }}
-            >
-              Comprar um passe
-            </button>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Dica: se você acha que já pagou, toque em “Atualizar” acima.
-            </div>
+            <p>Você está logado, mas não tem passe ativo.</p>
+            <button onClick={scrollToPlans}>Comprar passe</button>
           </>
         ) : (
           <>
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              Para <b>recuperar seu passe</b> (se você já comprou antes), entre com seu e-mail.
-            </p>
-
-            <Link
-              href="/login"
-              style={{
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 16,
-                cursor: "pointer",
-                marginTop: 4,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                textDecoration: "none",
-                color: "black",
-              }}
-            >
-              Entrar / recuperar passe
-            </Link>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Você não será cobrado ao entrar — isso só serve para o app reconhecer seu acesso.
-            </div>
+            <p>Entre com seu e-mail para recuperar seu acesso.</p>
+            <Link href="/login">Entrar</Link>
           </>
         )}
 
-        {error && (
-          <div style={{ color: "crimson", fontSize: 13, lineHeight: 1.35 }}>
-            <b>Erro:</b> {error}
-          </div>
-        )}
+        {error && <div style={{ color: "crimson" }}>{error}</div>}
       </div>
 
-      {/* 4) Planos pagos */}
-      <div id="passes" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <h2 style={{ fontSize: 16, margin: 0 }}>Escolha seu passe</h2>
-
-        <PlanButton href="/login?plano=1h" title="1 hora" subtitle="Acesso por 60 minutos" />
-        <PlanButton href="/login?plano=2h" title="2 horas" subtitle="Acesso por 120 minutos" />
-        <PlanButton href="/login?plano=day" title="Dia todo" subtitle="Acesso por 24 horas" />
-      </div>
-
-      {/* Login opcional (pequeno) */}
-      <div style={{ marginTop: 4, textAlign: "center" }}>
-        <Link href="/login" style={{ fontSize: 13, textDecoration: "none" }}>
-          Já tenho conta / entrar
-        </Link>
+      {/* PASSES */}
+      <div id="passes">
+        <h2>Escolha seu passe</h2>
+        <Link href="/login?plano=1h">1 hora</Link>
+        <br />
+        <Link href="/login?plano=2h">2 horas</Link>
+        <br />
+        <Link href="/login?plano=day">Dia todo</Link>
       </div>
     </main>
-  );
-}
-
-function PlanButton({
-  href,
-  title,
-  subtitle,
-}: {
-  href: string;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <Link
-      href={href}
-      style={{
-        height: 64,
-        borderRadius: 16,
-        border: "1px solid rgba(0,0,0,0.15)",
-        background: "white",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        padding: "0 16px",
-        textDecoration: "none",
-        color: "black",
-      }}
-    >
-      <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
-      <div style={{ fontSize: 13, opacity: 0.75 }}>{subtitle}</div>
-    </Link>
   );
 }
