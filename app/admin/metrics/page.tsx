@@ -32,7 +32,8 @@ export default function AdminMetricsPage() {
   const [to, setTo] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exportingMetrics, setExportingMetrics] = useState(false);
+  const [exportingMailing, setExportingMailing] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -63,9 +64,7 @@ export default function AdminMetricsPage() {
       const params = buildParams();
 
       const res = await fetch(`/api/admin/metrics?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
 
@@ -84,56 +83,71 @@ export default function AdminMetricsPage() {
     }
   }
 
-  async function exportCsv() {
+  async function downloadCsv(url: string, token: string, fallbackName: string) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const maybeJson = await res.json().catch(() => null);
+      throw new Error(maybeJson?.error || "Erro ao exportar CSV.");
+    }
+
+    const blob = await res.blob();
+
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match?.[1] || fallbackName;
+
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  }
+
+  async function exportMetricsCsv() {
     setError(null);
-    setExporting(true);
+    setExportingMetrics(true);
 
     try {
       const supabase = getSupabaseClient();
       const { data: session } = await supabase.auth.getSession();
 
       const token = session?.session?.access_token;
-      if (!token) {
-        setError("Sessão inválida. Faça login novamente no admin.");
-        setExporting(false);
-        return;
-      }
+      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
 
       const params = buildParams();
-
-      const res = await fetch(`/api/admin/metrics/export?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const maybeJson = await res.json().catch(() => null);
-        setError(maybeJson?.error || "Erro ao exportar CSV.");
-        setExporting(false);
-        return;
-      }
-
-      const blob = await res.blob();
-
-      // tenta extrair filename do header
-      const disposition = res.headers.get("content-disposition") || "";
-      const match = disposition.match(/filename="([^"]+)"/);
-      const filename = match?.[1] || "metrics.csv";
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      await downloadCsv(`/api/admin/metrics/export?${params.toString()}`, token, "metrics.csv");
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
-      setExporting(false);
+      setExportingMetrics(false);
+    }
+  }
+
+  async function exportMailingCsv() {
+    setError(null);
+    setExportingMailing(true);
+
+    try {
+      const supabase = getSupabaseClient();
+      const { data: session } = await supabase.auth.getSession();
+
+      const token = session?.session?.access_token;
+      if (!token) throw new Error("Sessão inválida. Faça login novamente no admin.");
+
+      const params = buildParams();
+      // OBS: o endpoint de mailing export usa from/to (exp é ignorado por enquanto)
+      await downloadCsv(`/api/admin/mailing/export?${params.toString()}`, token, "mailing.csv");
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setExportingMailing(false);
     }
   }
 
@@ -180,8 +194,8 @@ export default function AdminMetricsPage() {
         </button>
 
         <button
-          onClick={exportCsv}
-          disabled={exporting}
+          onClick={exportMetricsCsv}
+          disabled={exportingMetrics}
           style={{
             padding: "9px 12px",
             border: "1px solid #111827",
@@ -190,7 +204,21 @@ export default function AdminMetricsPage() {
             borderRadius: 8,
           }}
         >
-          {exporting ? "Exportando…" : "Exportar CSV (métricas)"}
+          {exportingMetrics ? "Exportando…" : "Exportar CSV (métricas)"}
+        </button>
+
+        <button
+          onClick={exportMailingCsv}
+          disabled={exportingMailing}
+          style={{
+            padding: "9px 12px",
+            border: "1px solid #E5E7EB",
+            background: "#fff",
+            color: "#111827",
+            borderRadius: 8,
+          }}
+        >
+          {exportingMailing ? "Exportando…" : "Exportar CSV (mailing)"}
         </button>
       </div>
 
