@@ -147,11 +147,16 @@ function CheckoutInner() {
       )}
 
       <Link
-        href="/"
-        style={{ textDecoration: "none", textAlign: "center" }}
-      >
-        Voltar para a landing
-      </Link>
+  href={
+    exp && exp.trim()
+      ? `/journey/${encodeURIComponent(exp.trim())}/landing`
+      : "/"
+  }
+  style={{ textDecoration: "none", textAlign: "center" }}
+>
+  Voltar para a landing
+</Link>
+
     </main>
   );
 }
