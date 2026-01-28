@@ -11,6 +11,39 @@ function getSupabaseClient() {
   return createClient(url, anon);
 }
 
+function readExpFromUrl(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+
+    // aceitamos vários nomes (pra facilitar QR depois)
+    const exp =
+      (params.get("exp") ||
+        params.get("experience_id") ||
+        params.get("experience") ||
+        "")
+        .trim();
+
+    return exp;
+  } catch {
+    return "";
+  }
+}
+
+function getLastExpFallback(): string {
+  try {
+    return localStorage.getItem("jornada:last_exp") || "";
+  } catch {
+    return "";
+  }
+}
+
+function persistLastExp(slug: string) {
+  try {
+    if (!slug) return;
+    localStorage.setItem("jornada:last_exp", slug);
+  } catch {}
+}
+
 export default function PaymentPendingPage() {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseClient(), []);
@@ -20,10 +53,15 @@ export default function PaymentPendingPage() {
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
 
+  // ✅ NOVO: contexto da experiência (slug)
+  const [exp, setExp] = useState<string>("");
+
+  // ✅ NOVO: quando não está logado, mostramos botão para login
+  const [needsLogin, setNeedsLogin] = useState(false);
+
   // ===== Polling progressivo (anti-enxame) =====
-  // sequência de intervalos entre checagens automáticas
   const SCHEDULE_MS = [5000, 10000, 20000, 30000]; // depois mantém 30s
-  const MAX_TOTAL_MS = 3 * 60 * 1000; // ~3 minutos (ajuste aqui se quiser)
+  const MAX_TOTAL_MS = 3 * 60 * 1000; // ~3 minutos
 
   const scheduleIndexRef = useRef(0);
   const startedAtRef = useRef<number>(0);
@@ -42,7 +80,6 @@ export default function PaymentPendingPage() {
     const startedAt = startedAtRef.current || Date.now();
     const elapsed = Date.now() - startedAt;
 
-    // já passou do tempo máximo -> para polling automático
     if (elapsed >= MAX_TOTAL_MS) {
       setStatusText(
         "Ainda aguardando confirmação… Se você já pagou, toque em “verificar agora”."
@@ -56,9 +93,22 @@ export default function PaymentPendingPage() {
 
     timeoutRef.current = window.setTimeout(async () => {
       await checkPassOnce();
-      scheduleIndexRef.current = idx + 1; // vai ficando mais lento
+      scheduleIndexRef.current = idx + 1;
       scheduleNextTick();
     }, waitMs);
+  }
+
+  function goLogin() {
+    const finalExp = exp || "audiowalk1";
+
+    // volta para o pending mantendo exp
+    const next = `/payment/pending?exp=${encodeURIComponent(finalExp)}`;
+
+    const qs = new URLSearchParams();
+    qs.set("exp", finalExp);
+    qs.set("next", next);
+
+    router.replace(`/login?${qs.toString()}`);
   }
 
   async function checkPassOnce() {
@@ -67,19 +117,24 @@ export default function PaymentPendingPage() {
 
     try {
       setError(null);
+      setNeedsLogin(false);
       setStatusText("Verificando seu passe…");
 
       // 1) Verifica se há usuário logado
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+
       if (sessionErr) {
         setError("Não consegui verificar seu login.");
-        setStatusText("Tente voltar e fazer login novamente.");
+        setStatusText("Tente fazer login novamente.");
+        setNeedsLogin(true);
         return;
       }
 
       const session = sessionData?.session;
+
       if (!session?.user?.id) {
-        setStatusText("Você não está logado. Volte e faça login.");
+        setStatusText("Para liberar seu acesso, você precisa entrar com seu e-mail.");
+        setNeedsLogin(true);
         return;
       }
 
@@ -107,7 +162,9 @@ export default function PaymentPendingPage() {
 
       if (data && data.length > 0) {
         setStatusText("Pagamento confirmado! Liberando acesso…");
-        router.replace("/journey");
+
+        const finalExp = exp || "audiowalk1";
+        router.replace(`/journey/${encodeURIComponent(finalExp)}`);
         return;
       }
 
@@ -121,7 +178,6 @@ export default function PaymentPendingPage() {
   }
 
   function forceCheckNow() {
-    // clique manual: checa agora e "reinicia" o backoff
     scheduleIndexRef.current = 0;
     startedAtRef.current = Date.now();
     clearTimer();
@@ -131,7 +187,13 @@ export default function PaymentPendingPage() {
   }
 
   useEffect(() => {
-    // inicia contagem e faz a primeira checagem
+    // ✅ NOVO: ler exp e persistir como fallback do app inteiro
+    const expFromUrl = readExpFromUrl();
+    const finalExp = expFromUrl || getLastExpFallback() || "audiowalk1";
+
+    setExp(finalExp);
+    persistLastExp(finalExp);
+
     startedAtRef.current = Date.now();
     scheduleIndexRef.current = 0;
 
@@ -155,10 +217,41 @@ export default function PaymentPendingPage() {
         {lastCheck ? `Última checagem: ${lastCheck}` : "Fazendo a primeira checagem…"}
       </div>
 
+      {/* ✅ contexto da experiência */}
+      <div
+        style={{
+          fontSize: 13,
+          opacity: 0.75,
+          borderRadius: 12,
+          border: "1px solid rgba(0,0,0,0.12)",
+          background: "rgba(0,0,0,0.03)",
+          padding: 10,
+        }}
+      >
+        Experiência: <b>{exp || "carregando…"}</b>
+      </div>
+
       {error && (
         <div style={{ color: "crimson" }}>
           <b>Erro:</b> {error}
         </div>
+      )}
+
+      {/* ✅ NOVO: botão de login quando não há sessão */}
+      {needsLogin && (
+        <button
+          onClick={goLogin}
+          style={{
+            height: 48,
+            borderRadius: 14,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "white",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          Fazer login para liberar acesso
+        </button>
       )}
 
       <button
