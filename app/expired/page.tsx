@@ -11,6 +11,13 @@ function getLastExpFallback(): string {
   }
 }
 
+function persistLastExp(slug: string) {
+  try {
+    if (!slug) return;
+    localStorage.setItem("jornada:last_exp", slug);
+  } catch {}
+}
+
 export default function ExpiredPage() {
   const router = useRouter();
   const [exp, setExp] = useState<string>("");
@@ -19,8 +26,14 @@ export default function ExpiredPage() {
     // ✅ não usa useSearchParams (evita erro de prerender)
     const sp = new URLSearchParams(window.location.search);
     const fromUrl = (sp.get("exp") || "").trim();
-    const finalExp = fromUrl || getLastExpFallback();
+
+    // ✅ fallback seguro
+    const finalExp = fromUrl || getLastExpFallback() || "audiowalk1";
+
     setExp(finalExp);
+
+    // ✅ mantém o app consistente (landing usa isso)
+    persistLastExp(finalExp);
   }, []);
 
   function goCheckout(plano: "1h" | "2h" | "day") {
@@ -28,6 +41,16 @@ export default function ExpiredPage() {
       ? `/checkout?plano=${plano}&exp=${encodeURIComponent(exp)}`
       : `/checkout?plano=${plano}`;
     router.push(url);
+  }
+
+  function goJourney() {
+    if (!exp) return;
+    router.push(`/journey/${encodeURIComponent(exp)}`);
+  }
+
+  function goLanding() {
+    // landing é global; ela vai ler jornada:last_exp se precisar
+    router.replace("/");
   }
 
   return (
@@ -106,6 +129,42 @@ export default function ExpiredPage() {
           }}
         >
           Comprar 24 horas — R$ 29,90
+        </button>
+
+        {/* ✅ novo: caminho canônico pro Journey */}
+        <button
+          type="button"
+          onClick={goJourney}
+          disabled={!exp}
+          style={{
+            width: "100%",
+            height: 48,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.12)",
+            background: "rgba(0,0,0,0.04)",
+            fontSize: 14,
+            cursor: exp ? "pointer" : "not-allowed",
+            opacity: exp ? 1 : 0.6,
+            marginTop: 6,
+          }}
+        >
+          ENTRAR NA EXPERIÊNCIA
+        </button>
+
+        <button
+          type="button"
+          onClick={goLanding}
+          style={{
+            width: "100%",
+            height: 44,
+            borderRadius: 16,
+            border: "1px solid rgba(0,0,0,0.12)",
+            background: "white",
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Voltar para a landing
         </button>
       </div>
     </main>
