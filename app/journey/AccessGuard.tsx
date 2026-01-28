@@ -102,6 +102,31 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     router.replace(url);
   }
 
+  function goLoginWithExp() {
+    // ✅ IMPORTANTÍSSIMO: sempre carregar o login AMARRADO ao slug atual
+    const exp =
+      expRef.current ||
+      getJourneySlugFromPathname() ||
+      getLastExpFallback();
+
+    // ✅ opcional (para futuro): “next” dizendo pra onde voltar
+    // aqui usamos a própria rota atual (journey do slug)
+    let next = "";
+    try {
+      if (typeof window !== "undefined") {
+        next = window.location.pathname + window.location.search;
+      }
+    } catch {}
+
+    const url = exp
+      ? `/login?exp=${encodeURIComponent(exp)}${
+          next ? `&next=${encodeURIComponent(next)}` : ""
+        }`
+      : "/login";
+
+    router.replace(url);
+  }
+
   async function loadPassOnce() {
     setError(null);
 
@@ -113,7 +138,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     const session = sessionData.session;
 
     if (!session) {
-      router.replace("/login");
+      goLoginWithExp();
       return;
     }
 
