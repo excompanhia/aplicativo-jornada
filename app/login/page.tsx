@@ -12,17 +12,20 @@ const supabase = createClient(
 function readTrackingFromUrl() {
   const params = new URLSearchParams(window.location.search);
 
-  const experience_id =
-    (params.get("exp") ||
-      params.get("experience_id") ||
-      params.get("experience") ||
-      "default").trim();
+  // ✅ IMPORTANTE: sem QR por enquanto, o padrão deve ser o slug real
+  const experience_id = (
+    params.get("exp") ||
+    params.get("experience_id") ||
+    params.get("experience") ||
+    "audiowalk1"
+  ).trim();
 
-  const qr_point_id =
-    (params.get("qr") ||
-      params.get("qr_point_id") ||
-      params.get("point") ||
-      "").trim();
+  const qr_point_id = (
+    params.get("qr") ||
+    params.get("qr_point_id") ||
+    params.get("point") ||
+    ""
+  ).trim();
 
   return { experience_id, qr_point_id };
 }
@@ -32,7 +35,7 @@ export default function LoginPage() {
 
   const tracking = useMemo(() => {
     if (typeof window === "undefined") {
-      return { experience_id: "default", qr_point_id: "" };
+      return { experience_id: "audiowalk1", qr_point_id: "" };
     }
     return readTrackingFromUrl();
   }, []);
@@ -42,15 +45,18 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Se já estiver logado, volta pro Journey
+  function goAfterLogin() {
+    // ✅ pós-login sempre volta para a experiência correta por slug
+    const slug = tracking.experience_id || "audiowalk1";
+    router.replace(`/journey/${encodeURIComponent(slug)}`);
+  }
+
+  // Se já estiver logado, volta pro Journey (slug)
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
-        const qs = new URLSearchParams();
-        qs.set("exp", tracking.experience_id);
-        if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
-        router.replace(`/journey?${qs.toString()}`);
+        goAfterLogin();
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,15 +71,13 @@ export default function LoginPage() {
       return;
     }
 
-    const qs = new URLSearchParams();
-    qs.set("exp", tracking.experience_id);
-    if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
+    const slug = tracking.experience_id || "audiowalk1";
 
     const { error } = await supabase.auth.signInWithOtp({
       email: e,
       options: {
-        // Depois do clique no e-mail, volta para a Journey com exp/qr
-        emailRedirectTo: `${window.location.origin}/journey?${qs.toString()}`,
+        // ✅ Depois do clique no e-mail, volta para a experiência (slug)
+        emailRedirectTo: `${window.location.origin}/journey/${encodeURIComponent(slug)}`,
       },
     });
 
@@ -109,10 +113,10 @@ export default function LoginPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            experience_id: tracking.experience_id,
+            experience_id: tracking.experience_id || "audiowalk1",
             event_type: "otp_login",
             user_id,
-            qr_point_id: tracking.qr_point_id || null, // opcional, mas útil
+            qr_point_id: tracking.qr_point_id || null,
           }),
           cache: "no-store",
         });
@@ -121,11 +125,7 @@ export default function LoginPage() {
       // não quebra o login
     }
 
-    const qs = new URLSearchParams();
-    qs.set("exp", tracking.experience_id);
-    if (tracking.qr_point_id) qs.set("qr", tracking.qr_point_id);
-
-    router.replace(`/journey?${qs.toString()}`);
+    goAfterLogin();
   }
 
   return (
@@ -151,7 +151,7 @@ export default function LoginPage() {
           </button>
 
           <p style={{ marginTop: 12, opacity: 0.7, fontSize: 12 }}>
-            Experiência: <strong>{tracking.experience_id}</strong>
+            Experiência: <strong>{tracking.experience_id || "audiowalk1"}</strong>
             {tracking.qr_point_id ? (
               <>
                 {" "}
