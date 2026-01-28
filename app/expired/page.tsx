@@ -43,13 +43,7 @@ export default function ExpiredPage() {
     router.push(url);
   }
 
-  function goJourney() {
-    if (!exp) return;
-    router.push(`/journey/${encodeURIComponent(exp)}`);
-  }
-
   function goLanding() {
-    // landing é global; ela vai ler jornada:last_exp se precisar
     router.replace("/");
   }
 
@@ -62,10 +56,10 @@ export default function ExpiredPage() {
         margin: "0 auto",
       }}
     >
-      <h1 style={{ margin: 0, fontSize: 26 }}>Passe expirado</h1>
+      <h1 style={{ margin: 0, fontSize: 26 }}>Comprar passe</h1>
 
       <p style={{ marginTop: 10, color: "#374151", lineHeight: 1.4 }}>
-        Você não tem um passe ativo no momento.
+        Escolha um passe para liberar o acesso temporário à experiência.
       </p>
 
       <div
@@ -131,26 +125,6 @@ export default function ExpiredPage() {
           Comprar 24 horas — R$ 29,90
         </button>
 
-        {/* ✅ novo: caminho canônico pro Journey */}
-        <button
-          type="button"
-          onClick={goJourney}
-          disabled={!exp}
-          style={{
-            width: "100%",
-            height: 48,
-            borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.12)",
-            background: "rgba(0,0,0,0.04)",
-            fontSize: 14,
-            cursor: exp ? "pointer" : "not-allowed",
-            opacity: exp ? 1 : 0.6,
-            marginTop: 6,
-          }}
-        >
-          ENTRAR NA EXPERIÊNCIA
-        </button>
-
         <button
           type="button"
           onClick={goLanding}
@@ -162,10 +136,15 @@ export default function ExpiredPage() {
             background: "white",
             fontSize: 13,
             cursor: "pointer",
+            marginTop: 6,
           }}
         >
           Voltar para a landing
         </button>
+      </div>
+
+      <div style={{ marginTop: 12, fontSize: 12, opacity: 0.7, lineHeight: 1.35 }}>
+        Você será direcionado para o checkout do Mercado Pago em uma nova etapa.
       </div>
     </main>
   );
