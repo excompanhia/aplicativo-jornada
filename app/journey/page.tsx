@@ -23,6 +23,9 @@ const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
 // Analytics keys
 const KEY_ANON_ID = "jornada:anon_id";
 
+// ✅ Experiência atual (slug) salva por /journey/[slug]
+const KEY_CURRENT_EXPERIENCE = "jornada:current_experience_id";
+
 // ✅ BLOCO 3: polimento preload (UI simples)
 type PreloadUiState =
   | { status: "idle" }
@@ -63,7 +66,8 @@ function getOrCreateAnonId() {
   try {
     // navegadores modernos
     // @ts-ignore
-    id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "";
+    id =
+      typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "";
   } catch {}
 
   if (!id) {
@@ -95,6 +99,17 @@ function readTrackingFromUrl() {
   return { experience_id, qr_point_id };
 }
 
+// ✅ fonte de verdade do experience_id para analytics
+function getExperienceIdForAnalytics() {
+  const fromLocal = safeLocalGet(KEY_CURRENT_EXPERIENCE);
+  if (fromLocal && fromLocal.trim()) return fromLocal.trim();
+
+  const fromUrl = readTrackingFromUrl().experience_id;
+  if (fromUrl && fromUrl.trim()) return fromUrl.trim();
+
+  return "default";
+}
+
 export default function JourneyPage() {
   const router = useRouter();
 
@@ -111,7 +126,9 @@ export default function JourneyPage() {
   const [isAnimating, setIsAnimating] = useState(false);
 
   // ✅ BLOCO 3: UI do preload
-  const [preloadUi, setPreloadUi] = useState<PreloadUiState>({ status: "idle" });
+  const [preloadUi, setPreloadUi] = useState<PreloadUiState>({
+    status: "idle",
+  });
 
   // player state
   const [playerState, setPlayerState] = useState<{
@@ -178,8 +195,9 @@ export default function JourneyPage() {
     analyticsStartedRef.current = true;
 
     try {
-      const { experience_id, qr_point_id } = readTrackingFromUrl();
+      const { qr_point_id } = readTrackingFromUrl();
 
+      const experience_id = getExperienceIdForAnalytics();
       const point = qr_point_id || "unknown";
       const anon_id = getOrCreateAnonId();
 
@@ -439,9 +457,17 @@ export default function JourneyPage() {
 
   return (
     <AccessGuard>
-      <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <main
+        style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}
+      >
         {/* Top bar */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <button
             type="button"
             onClick={() => setShowLibrary(true)}
@@ -649,7 +675,13 @@ export default function JourneyPage() {
                           gap: 12,
                         }}
                       >
-                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 3,
+                          }}
+                        >
                           <div style={{ fontSize: 14, fontWeight: 700 }}>
                             {st.title}
                           </div>
@@ -659,9 +691,7 @@ export default function JourneyPage() {
                           </div>
                         </div>
 
-                        <div style={{ fontSize: 12, opacity: 0.65 }}>
-                          abrir →
-                        </div>
+                        <div style={{ fontSize: 12, opacity: 0.65 }}>abrir →</div>
                       </button>
                     );
                   })}
@@ -739,7 +769,13 @@ function StationView({
       <div style={{ fontSize: 18, fontWeight: 700 }}>{title}</div>
       <AutoGallery images={images} seconds={3.5} />
 
-      <div style={{ borderRadius: 16, border: "1px solid rgba(0,0,0,0.15)", padding: 12 }}>
+      <div
+        style={{
+          borderRadius: 16,
+          border: "1px solid rgba(0,0,0,0.15)",
+          padding: 12,
+        }}
+      >
         <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 6 }}>Áudio</div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -820,7 +856,12 @@ function AutoGallery({ images, seconds }: { images: string[]; seconds: number })
         <img
           src={currentSrc}
           alt=""
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
         />
       ) : (
         <div
