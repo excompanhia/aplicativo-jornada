@@ -395,13 +395,15 @@ export default function JourneyPage() {
 
   // ✅ Biblioteca: sair para landing
   function exitToLanding() {
-    // salva o estado atual antes de sair
-    saveSnapshot();
-    safeSet(KEY_PLAYING, "false");
-    setPauseSignal((v) => v + 1);
+  // salva o estado atual antes de sair
+  saveSnapshot();
+  safeSet(KEY_PLAYING, "false");
+  setPauseSignal((v) => v + 1);
 
-    router.replace("/");
-  }
+  // ✅ comportamento mais correto para multi-experiência por QR/slug:
+  // volta para a origem (contexto do usuário) em vez de forçar "/"
+  router.back();
+}
 
   // swipe
   function onPointerDown(e: React.PointerEvent) {
