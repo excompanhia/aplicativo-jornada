@@ -9,11 +9,12 @@ function getSupabaseAdmin() {
 
 export async function GET(
   _req: Request,
-  { params }: { params: { slug: string } }
+  context: { params: Promise<{ slug: string }> }
 ) {
   try {
     const supabase = getSupabaseAdmin();
-    const slug = params.slug;
+
+    const { slug } = await context.params;
 
     const { data, error } = await supabase
       .from("experiences")
