@@ -395,15 +395,21 @@ export default function JourneyPage() {
 
   // ✅ Biblioteca: sair para landing
   function exitToLanding() {
-  // salva o estado atual antes de sair
-  saveSnapshot();
-  safeSet(KEY_PLAYING, "false");
-  setPauseSignal((v) => v + 1);
+    // salva o estado atual antes de sair
+    saveSnapshot();
+    safeSet(KEY_PLAYING, "false");
+    setPauseSignal((v) => v + 1);
 
-  // ✅ comportamento mais correto para multi-experiência por QR/slug:
-  // volta para a origem (contexto do usuário) em vez de forçar "/"
-  router.back();
-}
+    // ✅ sai para a landing da experiência atual (slug)
+    const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE);
+    if (slug && slug.trim()) {
+      router.replace(`/journey/${encodeURIComponent(slug.trim())}/landing`);
+      return;
+    }
+
+    // fallback conservador
+    router.replace("/");
+  }
 
   // swipe
   function onPointerDown(e: React.PointerEvent) {
