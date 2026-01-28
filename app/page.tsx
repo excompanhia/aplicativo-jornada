@@ -48,6 +48,22 @@ function getExpForPurchase(): string {
   }
 }
 
+function isOfflineNow(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    // navigator.onLine === false => offline
+    return navigator.onLine === false;
+  } catch {
+    return false;
+  }
+}
+
+function isAbortLikeError(msg: string) {
+  const s = (msg || "").toLowerCase();
+  // cobre "signal is aborted", "aborted", "aborterror", etc.
+  return s.includes("abort") || s.includes("aborted") || s.includes("signal");
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseClient(), []);
@@ -61,6 +77,16 @@ export default function Home() {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   async function checkStatus() {
+    // ✅ Se está offline, não tenta rede e não mostra erro técnico
+    if (isOfflineNow()) {
+      setError(null);
+      setIsLoading(false);
+      setIsLogged(false);
+      setUserEmail("");
+      setActivePass(null);
+      return;
+    }
+
     setError(null);
     setIsLoading(true);
 
@@ -100,6 +126,14 @@ export default function Home() {
         .limit(1);
 
       if (passErr) {
+        // ✅ Se caiu rede no meio, não mostra erro feio: assume offline/instável
+        if (isOfflineNow()) {
+          setError(null);
+          setIsLogged(false);
+          setUserEmail("");
+          setActivePass(null);
+          return;
+        }
         setActivePass(null);
         setError("Não consegui consultar seu passe agora.");
         return;
@@ -114,7 +148,18 @@ export default function Home() {
         setActivePass(null);
       }
     } catch (e: any) {
-      setError("Erro inesperado: " + String(e?.message || e));
+      const msg = String(e?.message || e);
+
+      // ✅ Se foi abort / rede / offline -> não exibe erro técnico
+      if (isOfflineNow() || isAbortLikeError(msg)) {
+        setError(null);
+        setIsLogged(false);
+        setUserEmail("");
+        setActivePass(null);
+        return;
+      }
+
+      setError("Erro inesperado: " + msg);
       setIsLogged(false);
       setUserEmail("");
       setActivePass(null);
@@ -136,8 +181,20 @@ export default function Home() {
 
   useEffect(() => {
     checkStatus();
+
+    // ✅ Se voltar online, tenta atualizar automaticamente
+    function onOnline() {
+      checkStatus();
+    }
+    window.addEventListener("online", onOnline);
+
     const t = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(t);
+
+    return () => {
+      window.removeEventListener("online", onOnline);
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const expiresMs = activePass?.expires_at
@@ -181,9 +238,7 @@ export default function Home() {
             boxShadow: "0 0 0 3px rgba(0,0,0,0.04)",
           }}
         />
-        <span
-          style={{ fontSize: 13, fontWeight: 700, color: textColor }}
-        >
+        <span style={{ fontSize: 13, fontWeight: 700, color: textColor }}>
           {label}
         </span>
       </div>
@@ -201,9 +256,41 @@ export default function Home() {
           border: "1px solid rgba(0,0,0,0.15)",
         }}
       >
-        <h1 style={{ fontSize: 22, margin: 0 }}>Jornada</h1>
-        <p style={{ marginTop: 10, lineHeight: 1.4 }}>
-          Uma experiência por estações: imagens em movimento, texto e áudio.
+        <h1 style={{ fontSize: 22, margin: 0, lineHeight: 1.2 }}>Jornada</h1>
+        <p style={{ margin: "10px 0 0 0", lineHeight: 1.4 }}>
+          Uma experiência por estações: imagens em movimento, texto e áudio. Você
+          pode experimentar grátis e, se quiser, comprar um passe de acesso
+          temporário.
+        </p>
+      </div>
+
+      <div
+        style={{
+          borderRadius: 16,
+          padding: 16,
+          border: "1px solid rgba(0,0,0,0.15)",
+        }}
+      >
+        <h2 style={{ fontSize: 16, margin: 0 }}>Experimente (grátis)</h2>
+        <p style={{ margin: "8px 0 12px 0", lineHeight: 1.4 }}>
+          Um trecho curto para você sentir o ritmo da experiência.
+        </p>
+
+        <audio controls style={{ width: "100%" }}>
+          <source src="/sample.mp3" type="audio/mpeg" />
+          Seu navegador não conseguiu tocar o áudio.
+        </audio>
+
+        <p
+          style={{
+            margin: "10px 0 0 0",
+            fontSize: 12,
+            opacity: 0.75,
+            lineHeight: 1.3,
+          }}
+        >
+          (Por enquanto este áudio é um “arquivo exemplo”. Depois vamos trocar
+          pelo seu.)
         </p>
       </div>
 
@@ -223,9 +310,11 @@ export default function Home() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            gap: 12,
           }}
         >
           <h2 style={{ fontSize: 16, margin: 0 }}>Seu acesso</h2>
+
           <button
             onClick={checkStatus}
             style={{
@@ -234,6 +323,8 @@ export default function Home() {
               borderRadius: 12,
               border: "1px solid rgba(0,0,0,0.15)",
               background: "white",
+              fontSize: 13,
+              cursor: "pointer",
             }}
           >
             Atualizar
@@ -241,24 +332,54 @@ export default function Home() {
         </div>
 
         {isLoading ? (
-          <p>Verificando…</p>
+          <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
         ) : hasActivePass ? (
           <>
             <StatusPill color="green" label="Você está ONLINE" />
 
-            <p style={{ margin: 0 }}>
-              Passe válido até{" "}
+            {isLogged && userEmail ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                  Logado como: <b>{userEmail}</b>
+                </div>
+
+                <button
+                  onClick={logout}
+                  style={{
+                    height: 30,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Sair / trocar e-mail
+                </button>
+              </div>
+            ) : null}
+
+            <p style={{ margin: 0, lineHeight: 1.4 }}>
+              ✅ Seu passe está ativo até{" "}
               <b>
-                {formatLocalTime(activePass!.expires_at)} –{" "}
+                {formatLocalTime(activePass!.expires_at)} do dia{" "}
                 {formatLocalDateBR(activePass!.expires_at)}
               </b>
+              .
+            </p>
+            <p style={{ margin: 0, lineHeight: 1.4, opacity: 0.85 }}>
+              Faltam <b>{formatTimeLeft(remainingMs!)}</b>.
             </p>
 
-            <p style={{ margin: 0 }}>
-              Faltam <b>{formatTimeLeft(remainingMs!)}</b>
-            </p>
-
-            {/* ✅ ENTRAR AGORA VAI PARA /journey/[slug] */}
             <button
               onClick={() => {
                 const exp = getExpForPurchase();
@@ -271,18 +392,54 @@ export default function Home() {
                 background: "white",
                 fontSize: 16,
                 cursor: "pointer",
-                marginTop: 6,
+                marginTop: 4,
               }}
             >
               ENTRAR
             </button>
+
+            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
+              Se você fechar o app, é só voltar aqui e tocar em “ENTRAR”.
+            </div>
           </>
         ) : isLogged ? (
           <>
-            <StatusPill
-              color="yellow"
-              label="Logado, mas sem passe ativo"
-            />
+            <StatusPill color="yellow" label="VOCÊ ESTÁ LOGADO mas SEM PASSE VÁLIDO" />
+
+            {userEmail ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+                  Logado como: <b>{userEmail}</b>
+                </div>
+
+                <button
+                  onClick={logout}
+                  style={{
+                    height: 30,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(0,0,0,0.15)",
+                    background: "white",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Sair
+                </button>
+              </div>
+            ) : null}
+
+            <p style={{ margin: 0, lineHeight: 1.4 }}>
+              Compre seu passe e acesse a experiência.
+            </p>
 
             <button
               onClick={() => {
@@ -295,6 +452,8 @@ export default function Home() {
                 border: "1px solid rgba(0,0,0,0.15)",
                 background: "white",
                 fontSize: 16,
+                cursor: "pointer",
+                marginTop: 4,
               }}
             >
               COMPRAR PASSE
@@ -303,6 +462,11 @@ export default function Home() {
         ) : (
           <>
             <StatusPill color="red" label="Você está OFFLINE" />
+
+            <p style={{ margin: 0, lineHeight: 1.4 }}>
+              Acesse a experiência com seu e-mail e compre seu passe.
+            </p>
+
             <button
               onClick={() => router.push("/login")}
               style={{
@@ -311,15 +475,21 @@ export default function Home() {
                 border: "1px solid rgba(0,0,0,0.15)",
                 background: "white",
                 fontSize: 16,
+                cursor: "pointer",
+                marginTop: 4,
               }}
             >
               COMEÇAR
             </button>
+
+            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
+              Você não será cobrado ao entrar — isso só serve para o app reconhecer seu acesso.
+            </div>
           </>
         )}
 
         {error && (
-          <div style={{ color: "crimson", fontSize: 13 }}>
+          <div style={{ color: "crimson", fontSize: 13, lineHeight: 1.35 }}>
             <b>Erro:</b> {error}
           </div>
         )}
