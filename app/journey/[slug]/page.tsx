@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-
-// Reaproveita o Journey real existente (app/journey/page.tsx)
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import JourneyPage from "../page";
 
 const KEY_CURRENT_EXPERIENCE = "jornada:current_experience_id";
@@ -14,22 +12,22 @@ type LoadState =
   | { status: "ok" };
 
 export default function JourneyBySlugPage() {
+  const router = useRouter();
   const params = useParams();
+  const search = useSearchParams();
+
   const slug = (params?.slug as string) || "";
+  const play = search.get("play") === "1";
 
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
-  // 1) Salva o slug localmente (métricas/lógica futura)
   useEffect(() => {
     if (!slug) return;
     try {
       localStorage.setItem(KEY_CURRENT_EXPERIENCE, slug);
-    } catch {
-      // sem crash se storage estiver bloqueado
-    }
+    } catch {}
   }, [slug]);
 
-  // 2) Valida se a experiência existe e está "publicada" (is_active = true)
   useEffect(() => {
     if (!slug) {
       setState({ status: "blocked" });
@@ -40,8 +38,6 @@ export default function JourneyBySlugPage() {
 
     (async () => {
       try {
-        setState({ status: "loading" });
-
         const res = await fetch(`/api/experiences/${encodeURIComponent(slug)}`, {
           method: "GET",
           cache: "no-store",
@@ -69,82 +65,18 @@ export default function JourneyBySlugPage() {
     };
   }, [slug]);
 
-  // 3) UI simples (sem “UI bonita” ainda)
-  if (state.status === "loading") {
-    return (
-      <main
-        style={{
-          padding: 16,
-          minHeight: "70vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial',
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 18,
-            background: "white",
-            padding: 16,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>
-            Carregando experiência…
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.45 }}>
-            Estamos validando se este AudioWalk está publicado.
-          </div>
-        </div>
-      </main>
-    );
-  }
+  // Se estiver ok e NÃO for play=1 → manda para a landing
+  useEffect(() => {
+    if (state.status !== "ok") return;
+    if (play) return;
 
-  if (state.status === "blocked") {
-    return (
-      <main
-        style={{
-          padding: 16,
-          minHeight: "70vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial',
-        }}
-      >
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            border: "1px solid rgba(0,0,0,0.12)",
-            borderRadius: 18,
-            background: "white",
-            padding: 16,
-          }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>
-            Experiência indisponível
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.45 }}>
-            Este link não está ativo no momento (a experiência pode estar em rascunho
-            ou não existir).
-          </div>
+    router.replace(`/journey/${encodeURIComponent(slug)}/landing`);
+  }, [state.status, play, slug, router]);
 
-          <div style={{ height: 10 }} />
+  if (state.status === "loading") return null;
+  if (state.status === "blocked") return null;
 
-          <div style={{ fontSize: 12, opacity: 0.6 }}>
-            Slug: <span style={{ fontWeight: 700 }}>{slug || "(vazio)"}</span>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  if (!play) return null;
 
-  // 4) Se passou na validação, entra no Journey real
   return <JourneyPage />;
 }

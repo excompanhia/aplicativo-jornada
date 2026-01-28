@@ -17,7 +17,7 @@ export default function ExperienceLandingPage() {
 
   const [state, setState] = useState<State>({ status: "loading" });
 
-  // 1) Salva o slug localmente (para coerência geral do app)
+  // Salva o slug localmente
   useEffect(() => {
     if (!slug) return;
     try {
@@ -25,7 +25,7 @@ export default function ExperienceLandingPage() {
     } catch {}
   }, [slug]);
 
-  // 2) Valida se existe e está ativa/publicada (is_active = true)
+  // Valida se a experiência existe e está publicada
   useEffect(() => {
     if (!slug) {
       setState({ status: "blocked" });
@@ -36,8 +36,6 @@ export default function ExperienceLandingPage() {
 
     (async () => {
       try {
-        setState({ status: "loading" });
-
         const res = await fetch(`/api/experiences/${encodeURIComponent(slug)}`, {
           method: "GET",
           cache: "no-store",
@@ -70,11 +68,8 @@ export default function ExperienceLandingPage() {
   if (state.status === "loading") {
     return (
       <main style={{ padding: 16, minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ width: "100%", maxWidth: 520, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, background: "white", padding: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>Carregando experiência…</div>
-          <div style={{ fontSize: 13, opacity: 0.75, lineHeight: 1.45 }}>
-            Validando se este AudioWalk está publicado.
-          </div>
+        <div style={{ maxWidth: 520, width: "100%", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, padding: 16 }}>
+          <strong>Carregando experiência…</strong>
         </div>
       </main>
     );
@@ -83,32 +78,14 @@ export default function ExperienceLandingPage() {
   if (state.status === "blocked") {
     return (
       <main style={{ padding: 16, minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ width: "100%", maxWidth: 520, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, background: "white", padding: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>Experiência indisponível</div>
-          <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.45 }}>
-            Este link não está ativo no momento (a experiência pode estar em rascunho ou não existir).
+        <div style={{ maxWidth: 520, width: "100%", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, padding: 16 }}>
+          <strong>Experiência indisponível</strong>
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+            Este link não está ativo no momento.
           </div>
-
-          <div style={{ height: 10 }} />
-
-          <div style={{ fontSize: 12, opacity: 0.6 }}>
-            Slug: <span style={{ fontWeight: 700 }}>{slug || "(vazio)"}</span>
-          </div>
-
-          <div style={{ height: 14 }} />
-
           <button
-            type="button"
+            style={{ marginTop: 12 }}
             onClick={() => router.replace("/")}
-            style={{
-              height: 44,
-              padding: "0 14px",
-              borderRadius: 14,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "white",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
           >
             Voltar
           </button>
@@ -117,58 +94,31 @@ export default function ExperienceLandingPage() {
     );
   }
 
-  // OK
   return (
     <main style={{ padding: 16, minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: "100%", maxWidth: 520, border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, background: "white", padding: 16 }}>
-        <div style={{ fontSize: 16, fontWeight: 950, marginBottom: 6 }}>
-          {state.title}
-        </div>
-        <div style={{ fontSize: 13, opacity: 0.78, lineHeight: 1.45 }}>
-          Landing da experiência (pública). Para entrar na jornada, você precisa estar logado e com passe ativo.
+      <div style={{ maxWidth: 520, width: "100%", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 18, padding: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 900 }}>{state.title}</div>
+
+        <div style={{ marginTop: 8, fontSize: 13, opacity: 0.8 }}>
+          Landing pública da experiência.
         </div>
 
-        <div style={{ height: 14 }} />
-
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
           <button
-            type="button"
-            onClick={() => router.replace(`/journey/${encodeURIComponent(slug)}`)}
-            style={{
-              flex: 1,
-              height: 48,
-              padding: "0 14px",
-              borderRadius: 14,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "white",
-              fontWeight: 800,
-              cursor: "pointer",
-            }}
+            style={{ flex: 1, height: 48, fontWeight: 800 }}
+            onClick={() =>
+              router.replace(`/journey/${encodeURIComponent(slug)}?play=1`)
+            }
           >
             ENTRAR
           </button>
 
           <button
-            type="button"
+            style={{ height: 48 }}
             onClick={() => router.replace("/")}
-            style={{
-              height: 48,
-              padding: "0 14px",
-              borderRadius: 14,
-              border: "1px solid rgba(0,0,0,0.15)",
-              background: "white",
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
           >
             Voltar
           </button>
-        </div>
-
-        <div style={{ height: 10 }} />
-
-        <div style={{ fontSize: 12, opacity: 0.6 }}>
-          Slug: <span style={{ fontWeight: 700 }}>{slug}</span>
         </div>
       </div>
     </main>
