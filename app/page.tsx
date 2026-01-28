@@ -33,12 +33,23 @@ function formatLocalTime(iso: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ✅ data no formato BR (dd/mm/aaaa)
 function formatLocalDateBR(iso: string) {
   const d = new Date(iso);
   return d.toLocaleDateString("pt-BR");
 }
 
-// ✅ fonte única da experiência atual para a landing
+// ✅ contexto atual (somente se já existir histórico)
+function getExpForEnter(): string {
+  try {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("jornada:last_exp") || "";
+  } catch {
+    return "";
+  }
+}
+
+// ✅ pegar exp atual para mandar para /expired?exp=...
 function getExpForPurchase(): string {
   try {
     if (typeof window === "undefined") return "audiowalk1";
@@ -46,22 +57,6 @@ function getExpForPurchase(): string {
   } catch {
     return "audiowalk1";
   }
-}
-
-function isOfflineNow(): boolean {
-  try {
-    if (typeof window === "undefined") return false;
-    // navigator.onLine === false => offline
-    return navigator.onLine === false;
-  } catch {
-    return false;
-  }
-}
-
-function isAbortLikeError(msg: string) {
-  const s = (msg || "").toLowerCase();
-  // cobre "signal is aborted", "aborted", "aborterror", etc.
-  return s.includes("abort") || s.includes("aborted") || s.includes("signal");
 }
 
 export default function Home() {
@@ -74,19 +69,10 @@ export default function Home() {
   const [activePass, setActivePass] = useState<PassInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // contador regressivo
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   async function checkStatus() {
-    // ✅ Se está offline, não tenta rede e não mostra erro técnico
-    if (isOfflineNow()) {
-      setError(null);
-      setIsLoading(false);
-      setIsLogged(false);
-      setUserEmail("");
-      setActivePass(null);
-      return;
-    }
-
     setError(null);
     setIsLoading(true);
 
@@ -115,6 +101,7 @@ export default function Home() {
       setIsLogged(true);
       setUserEmail(session?.user?.email || "");
 
+      // procura passe ativo e válido
       const nowIso = new Date().toISOString();
       const { data, error: passErr } = await supabase
         .from("passes")
@@ -126,40 +113,18 @@ export default function Home() {
         .limit(1);
 
       if (passErr) {
-        // ✅ Se caiu rede no meio, não mostra erro feio: assume offline/instável
-        if (isOfflineNow()) {
-          setError(null);
-          setIsLogged(false);
-          setUserEmail("");
-          setActivePass(null);
-          return;
-        }
         setActivePass(null);
         setError("Não consegui consultar seu passe agora.");
         return;
       }
 
       if (data && data.length > 0 && data[0]?.expires_at) {
-        setActivePass({
-          id: data[0].id,
-          expires_at: data[0].expires_at,
-        });
+        setActivePass({ id: data[0].id, expires_at: data[0].expires_at });
       } else {
         setActivePass(null);
       }
     } catch (e: any) {
-      const msg = String(e?.message || e);
-
-      // ✅ Se foi abort / rede / offline -> não exibe erro técnico
-      if (isOfflineNow() || isAbortLikeError(msg)) {
-        setError(null);
-        setIsLogged(false);
-        setUserEmail("");
-        setActivePass(null);
-        return;
-      }
-
-      setError("Erro inesperado: " + msg);
+      setError("Erro inesperado: " + String(e?.message || e));
       setIsLogged(false);
       setUserEmail("");
       setActivePass(null);
@@ -168,6 +133,7 @@ export default function Home() {
     }
   }
 
+  // ✅ sair/trocar email
   async function logout() {
     try {
       await supabase.auth.signOut();
@@ -181,30 +147,18 @@ export default function Home() {
 
   useEffect(() => {
     checkStatus();
-
-    // ✅ Se voltar online, tenta atualizar automaticamente
-    function onOnline() {
-      checkStatus();
-    }
-    window.addEventListener("online", onOnline);
-
     const t = setInterval(() => setNowMs(Date.now()), 1000);
-
-    return () => {
-      window.removeEventListener("online", onOnline);
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const expiresMs = activePass?.expires_at
     ? new Date(activePass.expires_at).getTime()
     : null;
-
   const remainingMs = expiresMs ? expiresMs - nowMs : null;
-  const hasActivePass =
-    Boolean(activePass && remainingMs !== null && remainingMs > 0);
+  const hasActivePass = Boolean(activePass && remainingMs !== null && remainingMs > 0);
 
+  // ✅ status helpers (bolinha + label)
   function StatusPill({
     color,
     label,
@@ -213,18 +167,9 @@ export default function Home() {
     label: string;
   }) {
     const dotColor =
-      color === "red"
-        ? "#D11A2A"
-        : color === "yellow"
-        ? "#F4B400"
-        : "#18A957";
-
+      color === "red" ? "#D11A2A" : color === "yellow" ? "#F4B400" : "#18A957";
     const textColor =
-      color === "red"
-        ? "#B31222"
-        : color === "yellow"
-        ? "#9A6B00"
-        : "#118043";
+      color === "red" ? "#B31222" : color === "yellow" ? "#9A6B00" : "#118043";
 
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -246,9 +191,8 @@ export default function Home() {
   }
 
   return (
-    <main
-      style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}
-    >
+    <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 1) Apresentação curta */}
       <div
         style={{
           borderRadius: 16,
@@ -258,12 +202,12 @@ export default function Home() {
       >
         <h1 style={{ fontSize: 22, margin: 0, lineHeight: 1.2 }}>Jornada</h1>
         <p style={{ margin: "10px 0 0 0", lineHeight: 1.4 }}>
-          Uma experiência por estações: imagens em movimento, texto e áudio. Você
-          pode experimentar grátis e, se quiser, comprar um passe de acesso
-          temporário.
+          Uma experiência por estações: imagens em movimento, texto e áudio. Você pode
+          experimentar grátis e, se quiser, comprar um passe de acesso temporário.
         </p>
       </div>
 
+      {/* 2) Experiência grátis */}
       <div
         style={{
           borderRadius: 16,
@@ -289,11 +233,11 @@ export default function Home() {
             lineHeight: 1.3,
           }}
         >
-          (Por enquanto este áudio é um “arquivo exemplo”. Depois vamos trocar
-          pelo seu.)
+          (Por enquanto este áudio é um “arquivo exemplo”. Depois vamos trocar pelo seu.)
         </p>
       </div>
 
+      {/* ✅ 3) BLOCO ÚNICO: status do passe / continuar / recuperar */}
       <div
         style={{
           borderRadius: 16,
@@ -334,6 +278,7 @@ export default function Home() {
         {isLoading ? (
           <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
         ) : hasActivePass ? (
+          // ✅ 3) COM PASSE + COM LOGIN
           <>
             <StatusPill color="green" label="Você está ONLINE" />
 
@@ -382,7 +327,17 @@ export default function Home() {
 
             <button
               onClick={() => {
-                const exp = getExpForPurchase();
+                setError(null);
+                const exp = getExpForEnter();
+
+                // ✅ não inventa "audiowalk1" aqui — se não houver contexto, pede QR/seleção
+                if (!exp) {
+                  setError(
+                    "Não encontrei qual experiência você quer abrir. Acesse pelo QR Code da experiência (ou, no futuro, escolha na lista)."
+                  );
+                  return;
+                }
+
                 router.push(`/journey/${encodeURIComponent(exp)}`);
               }}
               style={{
@@ -403,6 +358,7 @@ export default function Home() {
             </div>
           </>
         ) : isLogged ? (
+          // ✅ 2) SEM PASSE + COM LOGIN
           <>
             <StatusPill color="yellow" label="VOCÊ ESTÁ LOGADO mas SEM PASSE VÁLIDO" />
 
@@ -460,6 +416,7 @@ export default function Home() {
             </button>
           </>
         ) : (
+          // ✅ 1) SEM PASSE + SEM LOGIN
           <>
             <StatusPill color="red" label="Você está OFFLINE" />
 
