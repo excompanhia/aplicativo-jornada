@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { stations } from "../lib/stations";
+import { stations as fallbackStations } from "../lib/stations";
 import { collectStationAssets } from "@/app/lib/preloadStations";
 import { preloadAssets } from "@/app/lib/preloadRunner";
 import {
@@ -23,7 +23,7 @@ const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
 // Analytics keys
 const KEY_ANON_ID = "jornada:anon_id";
 
-// ✅ Experiência atual (slug) salva por /journey/[slug]
+// ✅ Experiência atual (slug) salva por /journey/[slug] e /journey/[slug]/landing
 const KEY_CURRENT_EXPERIENCE = "jornada:current_experience_id";
 
 // ✅ BLOCO 3: polimento preload (UI simples)
@@ -32,6 +32,14 @@ type PreloadUiState =
   | { status: "running"; done: number; total: number; lastUrl?: string }
   | { status: "done"; total: number }
   | { status: "error"; message: string };
+
+type Station = {
+  id: string;
+  title: string;
+  text: string;
+  images: string[];
+  audioSrc: string;
+};
 
 function safeLocalGet(key: string) {
   try {
@@ -54,7 +62,7 @@ function safeSessionGet(key: string) {
 }
 function safeSessionSet(key: string, value: string) {
   try {
-    window.sessionStorage.setItem(key, value);
+    return window.sessionStorage.setItem(key, value);
   } catch {}
 }
 
@@ -110,9 +118,21 @@ function getExperienceIdForAnalytics() {
   return "default";
 }
 
+function makeStationsKey(list: Station[]) {
+  if (!list || list.length === 0) return "empty";
+  // chave simples e estável para evitar rodar efeitos infinitamente
+  return list.map((s) => s.id).join("|");
+}
+
 export default function JourneyPage() {
   const router = useRouter();
 
+  // ✅ stations agora são dinâmicas (fallback seguro para stations.ts)
+  const [stationsState, setStationsState] = useState<Station[]>(
+    fallbackStations as unknown as Station[]
+  );
+
+  const stations = stationsState;
   const [index, setIndex] = useState(0);
   const current = stations[index];
 
@@ -187,6 +207,49 @@ export default function JourneyPage() {
     safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
   }
 
+  // ✅ (NOVO) Carrega stations reais do Supabase via API pública, usando o slug atual
+  const stationsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (stationsLoadedRef.current) return;
+    stationsLoadedRef.current = true;
+
+    const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE) || "";
+    if (!slug.trim()) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/experiences/${encodeURIComponent(slug.trim())}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!res.ok) return;
+        const json = await res.json().catch(() => null);
+        if (!json?.ok) return;
+
+        const rawStations = Array.isArray(json?.stations) ? json.stations : [];
+        if (!rawStations || rawStations.length === 0) return;
+
+        const mapped: Station[] = rawStations
+          .map((st: any) => ({
+            id: String(st?.id || ""),
+            title: String(st?.title || ""),
+            text: String(st?.text || ""),
+            images: Array.isArray(st?.images) ? st.images.map((x: any) => String(x)) : [],
+            audioSrc: String(st?.audio_url || ""),
+          }))
+          .filter((s: Station) => !!s.id && !!s.title);
+
+        if (mapped.length === 0) return;
+
+        setStationsState(mapped);
+      } catch {
+        // fallback conservador (fica no stations.ts)
+      }
+    })();
+  }, []);
+
   // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
   const analyticsStartedRef = useRef(false);
   useEffect(() => {
@@ -219,12 +282,17 @@ export default function JourneyPage() {
     } catch {}
   }, []);
 
-  // ✅ restaura após reload (ou primeira entrada)
-  const restoredOnceRef = useRef(false);
+  // ✅ restaura após reload (agora respeitando a lista de stations atual)
+  const restoredForKeyRef = useRef<string>("");
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (restoredOnceRef.current) return;
-    restoredOnceRef.current = true;
+
+    const stationsKey = makeStationsKey(stations);
+    if (!stationsKey || stationsKey === "empty") return;
+
+    // evita ficar re-rodando sem necessidade
+    if (restoredForKeyRef.current === stationsKey) return;
+    restoredForKeyRef.current = stationsKey;
 
     const rawIndex = safeGet(KEY_INDEX);
     const n = rawIndex ? Number(rawIndex) : 0;
@@ -249,7 +317,8 @@ export default function JourneyPage() {
         window.setTimeout(() => setPlaySignal((v) => v + 1), 250);
       }
     }, 250);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stations]);
 
   // ✅ salva continuamente enquanto toca
   useEffect(() => {
@@ -304,14 +373,18 @@ export default function JourneyPage() {
   // =========================
   // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA) + UI (BLOCO 3)
   // =========================
-  const preloadStartedRef = useRef(false);
+  const preloadForKeyRef = useRef<string>("");
   useEffect(() => {
-    if (preloadStartedRef.current) return;
-    preloadStartedRef.current = true;
+    const stationsKey = makeStationsKey(stations);
+    if (!stationsKey || stationsKey === "empty") return;
+
+    // roda preload 1x por lista de stations (por experiência)
+    if (preloadForKeyRef.current === stationsKey) return;
+    preloadForKeyRef.current = stationsKey;
 
     (async () => {
       try {
-        const urls = collectStationAssets(stations);
+        const urls = collectStationAssets(stations as any);
 
         ensureManifestForUrls(urls);
         const missing = filterMissingUrls(urls);
@@ -350,7 +423,7 @@ export default function JourneyPage() {
         window.setTimeout(() => setPreloadUi({ status: "idle" }), 2500);
       }
     })();
-  }, []);
+  }, [stations]);
 
   // track atual
   const track: EngineTrack | null = useMemo(() => {
@@ -518,9 +591,9 @@ export default function JourneyPage() {
           }}
         >
           <StationView
-            title={current.title}
-            text={current.text}
-            images={current.images}
+            title={current?.title || ""}
+            text={current?.text || ""}
+            images={current?.images || []}
             playerState={playerState}
             onPlay={() => {
               safeSet(KEY_PLAYING, "true");
