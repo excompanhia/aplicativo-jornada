@@ -72,6 +72,11 @@ export default function Home() {
   // contador regressivo
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
+  // ✅ PRIORIDADE 3.1 — lista de experiências ativas (Home geral)
+  const [activeSlugs, setActiveSlugs] = useState<string[]>([]);
+  const [expLoading, setExpLoading] = useState<boolean>(true);
+  const [expError, setExpError] = useState<string | null>(null);
+
   async function checkStatus() {
     setError(null);
     setIsLoading(true);
@@ -145,8 +150,42 @@ export default function Home() {
     }
   }
 
+  // ✅ carregar lista de experiências ativas (Home geral)
+  async function loadActiveExperiences() {
+    setExpError(null);
+    setExpLoading(true);
+    try {
+      // Mais seguro: selecionar só "slug" (não arrisca coluna que não exista)
+      const { data, error } = await supabase
+        .from("experiences")
+        .select("slug")
+        .eq("is_active", true)
+        .order("slug", { ascending: true });
+
+      if (error) {
+        setExpError("Não consegui carregar a lista de experiências.");
+        setActiveSlugs([]);
+        return;
+      }
+
+      const slugs =
+        (data || [])
+          .map((row: any) => String(row?.slug || "").trim())
+          .filter(Boolean) || [];
+
+      setActiveSlugs(slugs);
+    } catch (e: any) {
+      setExpError("Erro inesperado ao carregar experiências: " + String(e?.message || e));
+      setActiveSlugs([]);
+    } finally {
+      setExpLoading(false);
+    }
+  }
+
   useEffect(() => {
     checkStatus();
+    loadActiveExperiences();
+
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,7 +372,7 @@ export default function Home() {
                 // ✅ não inventa "audiowalk1" aqui — se não houver contexto, pede QR/seleção
                 if (!exp) {
                   setError(
-                    "Não encontrei qual experiência você quer abrir. Acesse pelo QR Code da experiência (ou, no futuro, escolha na lista)."
+                    "Não encontrei qual experiência você quer abrir. Acesse pelo QR Code da experiência (ou escolha na lista abaixo)."
                   );
                   return;
                 }
@@ -450,6 +489,88 @@ export default function Home() {
             <b>Erro:</b> {error}
           </div>
         )}
+      </div>
+
+      {/* ✅ PRIORIDADE 3.1 — HOME GERAL: lista automática de experiências ativas */}
+      <div
+        style={{
+          borderRadius: 16,
+          padding: 16,
+          border: "1px solid rgba(0,0,0,0.15)",
+          background: "white",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <h2 style={{ fontSize: 16, margin: 0 }}>Experiências disponíveis</h2>
+
+          <button
+            onClick={loadActiveExperiences}
+            style={{
+              height: 34,
+              padding: "0 12px",
+              borderRadius: 12,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Atualizar lista
+          </button>
+        </div>
+
+        <p style={{ margin: 0, lineHeight: 1.4, opacity: 0.85 }}>
+          Se você chegou por um link solto (sem QR), escolha uma experiência ativa abaixo.
+        </p>
+
+        {expLoading ? (
+          <p style={{ margin: 0, opacity: 0.8 }}>Carregando experiências…</p>
+        ) : expError ? (
+          <div style={{ color: "crimson", fontSize: 13, lineHeight: 1.35 }}>
+            <b>Erro:</b> {expError}
+          </div>
+        ) : activeSlugs.length === 0 ? (
+          <p style={{ margin: 0, opacity: 0.85 }}>
+            Nenhuma experiência ativa encontrada agora.
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {activeSlugs.map((slug) => (
+              <Link
+                key={slug}
+                href={`/journey/${encodeURIComponent(slug)}/landing`}
+                onClick={() => {
+                  try {
+                    localStorage.setItem("jornada:last_exp", slug);
+                  } catch {}
+                }}
+                style={{
+                  display: "block",
+                  padding: "12px 12px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(0,0,0,0.15)",
+                  textDecoration: "none",
+                  color: "black",
+                  background: "white",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>
+                  {slug}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4, lineHeight: 1.3 }}>
+                  Abrir landing da experiência
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
+          (QR e link direto continuam sendo o fluxo principal — isso aqui é só a “recepção” para quem chegou por fora.)
+        </div>
       </div>
     </main>
   );
