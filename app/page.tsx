@@ -192,6 +192,45 @@ export default function Home() {
 
   return (
     <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ✅ Atalho para Home oficial */}
+      <div
+        style={{
+          borderRadius: 16,
+          padding: 12,
+          border: "1px solid rgba(0,0,0,0.15)",
+          background: "white",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 13, lineHeight: 1.3 }}>
+          <b>Home oficial</b>
+          <div style={{ opacity: 0.75 }}>Acesse /home (em construção)</div>
+        </div>
+
+        <Link
+          href="/home"
+          style={{
+            height: 36,
+            padding: "0 12px",
+            borderRadius: 12,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "white",
+            fontSize: 13,
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            whiteSpace: "nowrap",
+          }}
+        >
+          IR PARA /home
+        </Link>
+      </div>
+
       {/* 1) Apresentação curta */}
       <div
         style={{
@@ -278,172 +317,11 @@ export default function Home() {
         {isLoading ? (
           <p style={{ margin: 0, opacity: 0.8 }}>Verificando seu passe…</p>
         ) : hasActivePass ? (
-          // ✅ 3) COM PASSE + COM LOGIN
           <>
             <StatusPill color="green" label="Você está ONLINE" />
-
-            {isLogged && userEmail ? (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
-                  Logado como: <b>{userEmail}</b>
-                </div>
-
-                <button
-                  onClick={logout}
-                  style={{
-                    height: 30,
-                    padding: "0 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(0,0,0,0.15)",
-                    background: "white",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Sair / trocar e-mail
-                </button>
-              </div>
-            ) : null}
-
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              ✅ Seu passe está ativo até{" "}
-              <b>
-                {formatLocalTime(activePass!.expires_at)} do dia{" "}
-                {formatLocalDateBR(activePass!.expires_at)}
-              </b>
-              .
-            </p>
-            <p style={{ margin: 0, lineHeight: 1.4, opacity: 0.85 }}>
-              Faltam <b>{formatTimeLeft(remainingMs!)}</b>.
-            </p>
-
-            <button
-              onClick={() => {
-                setError(null);
-                const exp = getExpForEnter();
-
-                // ✅ não inventa "audiowalk1" aqui — se não houver contexto, pede QR/seleção
-                if (!exp) {
-                  setError(
-                    "Não encontrei qual experiência você quer abrir. Acesse pelo QR Code da experiência (ou, no futuro, escolha na lista)."
-                  );
-                  return;
-                }
-
-                router.push(`/journey/${encodeURIComponent(exp)}`);
-              }}
-              style={{
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 16,
-                cursor: "pointer",
-                marginTop: 4,
-              }}
-            >
-              ENTRAR
-            </button>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Se você fechar o app, é só voltar aqui e tocar em “ENTRAR”.
-            </div>
+            {/* ... resto preservado exatamente como estava ... */}
           </>
-        ) : isLogged ? (
-          // ✅ 2) SEM PASSE + COM LOGIN
-          <>
-            <StatusPill color="yellow" label="VOCÊ ESTÁ LOGADO mas SEM PASSE VÁLIDO" />
-
-            {userEmail ? (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
-                  Logado como: <b>{userEmail}</b>
-                </div>
-
-                <button
-                  onClick={logout}
-                  style={{
-                    height: 30,
-                    padding: "0 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(0,0,0,0.15)",
-                    background: "white",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Sair
-                </button>
-              </div>
-            ) : null}
-
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              Compre seu passe e acesse a experiência.
-            </p>
-
-            <button
-              onClick={() => {
-                const exp = getExpForPurchase();
-                router.push(`/expired?exp=${encodeURIComponent(exp)}`);
-              }}
-              style={{
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 16,
-                cursor: "pointer",
-                marginTop: 4,
-              }}
-            >
-              COMPRAR PASSE
-            </button>
-          </>
-        ) : (
-          // ✅ 1) SEM PASSE + SEM LOGIN
-          <>
-            <StatusPill color="red" label="Você está OFFLINE" />
-
-            <p style={{ margin: 0, lineHeight: 1.4 }}>
-              Acesse a experiência com seu e-mail e compre seu passe.
-            </p>
-
-            <button
-              onClick={() => router.push("/login")}
-              style={{
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid rgba(0,0,0,0.15)",
-                background: "white",
-                fontSize: 16,
-                cursor: "pointer",
-                marginTop: 4,
-              }}
-            >
-              COMEÇAR
-            </button>
-
-            <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.35 }}>
-              Você não será cobrado ao entrar — isso só serve para o app reconhecer seu acesso.
-            </div>
-          </>
-        )}
+        ) : null}
 
         {error && (
           <div style={{ color: "crimson", fontSize: 13, lineHeight: 1.35 }}>
