@@ -598,7 +598,37 @@ export default function JourneyPage() {
   }
 
   // ✅ Tela simples quando a Journey não pode entrar
-  if (loadState.status === "loading") return null;
+  if (loadState.status === "loading") {
+    return (
+      <AccessGuard>
+        <main
+          style={{
+            padding: 16,
+            minHeight: "70vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 520,
+              width: "100%",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 18,
+              padding: 16,
+              background: "white",
+            }}
+          >
+            <strong>Carregando experiência…</strong>
+            <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+              Só um instante.
+            </div>
+          </div>
+        </main>
+      </AccessGuard>
+    );
+  }
 
   if (loadState.status === "blocked") {
     return (
