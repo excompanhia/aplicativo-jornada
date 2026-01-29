@@ -42,11 +42,12 @@ export async function GET(
 
     const safeLanding = landErr ? null : landing;
 
-    // 3) busca stations da experiência (ordenadas)
+    // 3) busca stations publicadas/ativas da experiência (ordenadas)
     const { data: stations, error: stErr } = await supabase
       .from("experience_stations")
       .select("id, position, title, text, images, audio_url")
       .eq("experience_id", exp.id)
+      .eq("is_active", true)
       .order("position", { ascending: true });
 
     // fallback conservador: se der erro, manda lista vazia
