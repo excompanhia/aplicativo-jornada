@@ -2,7 +2,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+// ✅ Fallback técnico (TEMPORÁRIO) — será removido antes da produção final
 import { stations as fallbackStations } from "../lib/stations";
+
 import { collectStationAssets } from "@/app/lib/preloadStations";
 import { preloadAssets } from "@/app/lib/preloadRunner";
 import {
@@ -23,7 +26,7 @@ const KEY_POS_PREFIX = "jornada:journey:pos:"; // + stationId
 // Analytics keys
 const KEY_ANON_ID = "jornada:anon_id";
 
-// ✅ Experiência atual (slug) salva por /journey/[slug] e /journey/[slug]/landing
+// ✅ Experiência atual (slug) salva por /journey/[slug]
 const KEY_CURRENT_EXPERIENCE = "jornada:current_experience_id";
 
 // ✅ BLOCO 3: polimento preload (UI simples)
@@ -33,7 +36,8 @@ type PreloadUiState =
   | { status: "done"; total: number }
   | { status: "error"; message: string };
 
-type Station = {
+// ✅ tipo interno que a Journey usa (compatível com preload/player/UI)
+type JourneyStation = {
   id: string;
   title: string;
   text: string;
@@ -62,7 +66,7 @@ function safeSessionGet(key: string) {
 }
 function safeSessionSet(key: string, value: string) {
   try {
-    return window.sessionStorage.setItem(key, value);
+    window.sessionStorage.setItem(key, value);
   } catch {}
 }
 
@@ -118,22 +122,74 @@ function getExperienceIdForAnalytics() {
   return "default";
 }
 
-function makeStationsKey(list: Station[]) {
-  if (!list || list.length === 0) return "empty";
-  // chave simples e estável para evitar rodar efeitos infinitamente
-  return list.map((s) => s.id).join("|");
-}
-
 export default function JourneyPage() {
   const router = useRouter();
 
-  // ✅ stations agora são dinâmicas (fallback seguro para stations.ts)
-  const [stationsState, setStationsState] = useState<Station[]>(
-    fallbackStations as unknown as Station[]
+  // ✅ NOVO: stations da Journey agora podem vir do Supabase (por slug)
+  // fallbackStations = airbag técnico temporário (será removido antes da produção final)
+  const [stations, setStations] = useState<JourneyStation[]>(
+    (fallbackStations as unknown as JourneyStation[]) || []
   );
 
-  const stations = stationsState;
+  // ✅ NOVO: tenta carregar stations reais da experiência atual (slug)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE);
+    if (!slug || !slug.trim()) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/experiences/${encodeURIComponent(slug.trim())}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!res.ok) return;
+
+        const json = await res.json().catch(() => null);
+        const list = json?.stations;
+
+        // Se não vier stations, mantém o fallback técnico (por enquanto)
+        if (!Array.isArray(list) || list.length === 0) return;
+
+        // Converte no formato interno que a Journey usa
+        const mapped: JourneyStation[] = list
+          .map((s: any) => ({
+            id: String(s?.id || ""),
+            title: String(s?.title || ""),
+            text: String(s?.text || ""),
+            images: Array.isArray(s?.images) ? s.images.map((x: any) => String(x)) : [],
+            audioSrc: String(s?.audio_url || ""),
+          }))
+          .filter((s) => s.id && s.title && s.audioSrc);
+
+        if (mapped.length === 0) return;
+
+        if (!cancelled) {
+          setStations(mapped);
+        }
+      } catch {
+        // fallback técnico silencioso (não quebra a experiência)
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ✅ Garante index válido quando stations mudam (evita crash)
   const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex((v) => {
+      const max = Math.max(0, stations.length - 1);
+      return Math.min(Math.max(0, v), max);
+    });
+  }, [stations.length]);
+
   const current = stations[index];
 
   // ✅ Biblioteca overlay
@@ -207,49 +263,6 @@ export default function JourneyPage() {
     safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
   }
 
-  // ✅ (NOVO) Carrega stations reais do Supabase via API pública, usando o slug atual
-  const stationsLoadedRef = useRef(false);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (stationsLoadedRef.current) return;
-    stationsLoadedRef.current = true;
-
-    const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE) || "";
-    if (!slug.trim()) return;
-
-    (async () => {
-      try {
-        const res = await fetch(`/api/experiences/${encodeURIComponent(slug.trim())}`, {
-          method: "GET",
-          cache: "no-store",
-        });
-
-        if (!res.ok) return;
-        const json = await res.json().catch(() => null);
-        if (!json?.ok) return;
-
-        const rawStations = Array.isArray(json?.stations) ? json.stations : [];
-        if (!rawStations || rawStations.length === 0) return;
-
-        const mapped: Station[] = rawStations
-          .map((st: any) => ({
-            id: String(st?.id || ""),
-            title: String(st?.title || ""),
-            text: String(st?.text || ""),
-            images: Array.isArray(st?.images) ? st.images.map((x: any) => String(x)) : [],
-            audioSrc: String(st?.audio_url || ""),
-          }))
-          .filter((s: Station) => !!s.id && !!s.title);
-
-        if (mapped.length === 0) return;
-
-        setStationsState(mapped);
-      } catch {
-        // fallback conservador (fica no stations.ts)
-      }
-    })();
-  }, []);
-
   // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
   const analyticsStartedRef = useRef(false);
   useEffect(() => {
@@ -282,17 +295,12 @@ export default function JourneyPage() {
     } catch {}
   }, []);
 
-  // ✅ restaura após reload (agora respeitando a lista de stations atual)
-  const restoredForKeyRef = useRef<string>("");
+  // ✅ restaura após reload (ou primeira entrada)
+  const restoredOnceRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
-
-    const stationsKey = makeStationsKey(stations);
-    if (!stationsKey || stationsKey === "empty") return;
-
-    // evita ficar re-rodando sem necessidade
-    if (restoredForKeyRef.current === stationsKey) return;
-    restoredForKeyRef.current = stationsKey;
+    if (restoredOnceRef.current) return;
+    restoredOnceRef.current = true;
 
     const rawIndex = safeGet(KEY_INDEX);
     const n = rawIndex ? Number(rawIndex) : 0;
@@ -318,7 +326,7 @@ export default function JourneyPage() {
       }
     }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stations]);
+  }, []);
 
   // ✅ salva continuamente enquanto toca
   useEffect(() => {
@@ -359,6 +367,7 @@ export default function JourneyPage() {
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("online", onOnline);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // pausa global (aviso 5 min)
@@ -368,19 +377,16 @@ export default function JourneyPage() {
       saveSnapshot();
       setPauseSignal((n) => n + 1);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // =========================
   // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA) + UI (BLOCO 3)
   // =========================
-  const preloadForKeyRef = useRef<string>("");
+  const preloadStartedRef = useRef(false);
   useEffect(() => {
-    const stationsKey = makeStationsKey(stations);
-    if (!stationsKey || stationsKey === "empty") return;
-
-    // roda preload 1x por lista de stations (por experiência)
-    if (preloadForKeyRef.current === stationsKey) return;
-    preloadForKeyRef.current = stationsKey;
+    if (preloadStartedRef.current) return;
+    preloadStartedRef.current = true;
 
     (async () => {
       try {
@@ -423,7 +429,8 @@ export default function JourneyPage() {
         window.setTimeout(() => setPreloadUi({ status: "idle" }), 2500);
       }
     })();
-  }, [stations]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // track atual
   const track: EngineTrack | null = useMemo(() => {
