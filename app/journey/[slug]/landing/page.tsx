@@ -31,6 +31,29 @@ type State =
       landing: LandingData | null;
     };
 
+const DEFAULT_BLOCKS = ["logo", "text", "status", "free_preview", "actions"] as const;
+
+const ALLOWED_BLOCKS = new Set<string>([
+  "logo",
+  "text",
+  "status",
+  "free_preview",
+  "actions",
+]);
+
+function formatDurationLabel(seconds: number | null | undefined) {
+  const s = typeof seconds === "number" && Number.isFinite(seconds) ? seconds : null;
+  if (!s || s <= 0) return "Ouvir prévia";
+
+  // arredonda para 5s pra não ficar “quebrado”
+  const rounded = Math.round(s / 5) * 5;
+
+  if (rounded < 60) return `Ouvir prévia (${rounded}s)`;
+
+  const mins = Math.round(rounded / 60);
+  return `Ouvir prévia (${mins} min)`;
+}
+
 export default function ExperienceLandingPage() {
   const router = useRouter();
   const params = useParams();
@@ -40,6 +63,7 @@ export default function ExperienceLandingPage() {
 
   // preview áudio (experimente grátis)
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentPreviewUrlRef = useRef<string>("");
   const [previewPlaying, setPreviewPlaying] = useState(false);
 
   // Salva o slug localmente
@@ -102,6 +126,7 @@ export default function ExperienceLandingPage() {
   // limpa áudio quando muda de experiência / recarrega
   useEffect(() => {
     setPreviewPlaying(false);
+    currentPreviewUrlRef.current = "";
     if (audioRef.current) {
       try {
         audioRef.current.pause();
@@ -123,7 +148,16 @@ export default function ExperienceLandingPage() {
 
   function togglePreview(url: string) {
     try {
-      if (!audioRef.current) {
+      // se mudou a URL da prévia, recria o áudio
+      if (!audioRef.current || currentPreviewUrlRef.current !== url) {
+        if (audioRef.current) {
+          try {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+          } catch {}
+        }
+
+        currentPreviewUrlRef.current = url;
         audioRef.current = new Audio(url);
         audioRef.current.addEventListener("ended", () => {
           setPreviewPlaying(false);
@@ -146,12 +180,23 @@ export default function ExperienceLandingPage() {
 
   // ordem dos blocos (se vier do Supabase) — fallback fixo
   const blocks = useMemo(() => {
-    if (state.status !== "ok") return ["logo", "text", "status", "free_preview", "actions"];
+    if (state.status !== "ok") return [...DEFAULT_BLOCKS];
 
     const raw = state.landing?.blocks_order;
-    if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) return raw;
 
-    return ["logo", "text", "status", "free_preview", "actions"];
+    if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) {
+      // filtra somente blocos conhecidos e remove duplicados
+      const filtered: string[] = [];
+      for (const key of raw) {
+        if (!ALLOWED_BLOCKS.has(key)) continue;
+        if (filtered.includes(key)) continue;
+        filtered.push(key);
+      }
+      // se vier vazio ou inválido, usa default
+      if (filtered.length > 0) return filtered;
+    }
+
+    return [...DEFAULT_BLOCKS];
   }, [state]);
 
   if (state.status === "loading") {
@@ -163,6 +208,7 @@ export default function ExperienceLandingPage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          background: "rgba(0,0,0,0.02)",
         }}
       >
         <div
@@ -173,9 +219,13 @@ export default function ExperienceLandingPage() {
             borderRadius: 18,
             padding: 16,
             background: "white",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
           }}
         >
           <strong>Carregando experiência…</strong>
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+            Só um instante.
+          </div>
         </div>
       </main>
     );
@@ -190,6 +240,7 @@ export default function ExperienceLandingPage() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          background: "rgba(0,0,0,0.02)",
         }}
       >
         <div
@@ -200,6 +251,7 @@ export default function ExperienceLandingPage() {
             borderRadius: 18,
             padding: 16,
             background: "white",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
           }}
         >
           <strong>Experiência indisponível</strong>
@@ -221,6 +273,9 @@ export default function ExperienceLandingPage() {
   const headline = (landing?.headline || exp.title || "").trim();
   const description = (landing?.description || "").trim();
   const previewUrl = (landing?.free_preview_audio_url || "").trim();
+  const previewDuration = landing?.free_preview_duration_seconds ?? null;
+
+  const previewLabel = formatDurationLabel(previewDuration);
 
   function renderBlock(key: string) {
     if (key === "logo") {
@@ -230,7 +285,7 @@ export default function ExperienceLandingPage() {
         <div
           style={{
             borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.15)",
+            border: "1px solid rgba(0,0,0,0.12)",
             overflow: "hidden",
             background: "rgba(0,0,0,0.02)",
           }}
@@ -249,15 +304,17 @@ export default function ExperienceLandingPage() {
         <div
           style={{
             borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.15)",
-            padding: 14,
+            border: "1px solid rgba(0,0,0,0.12)",
+            padding: 16,
             background: "white",
           }}
         >
-          <div style={{ fontSize: 18, fontWeight: 900 }}>{headline}</div>
+          <div style={{ fontSize: 22, fontWeight: 950, letterSpacing: -0.2 }}>
+            {headline}
+          </div>
 
           {description ? (
-            <div style={{ marginTop: 10, fontSize: 14, opacity: 0.85, lineHeight: 1.4 }}>
+            <div style={{ marginTop: 10, fontSize: 14, opacity: 0.88, lineHeight: 1.5 }}>
               {description}
             </div>
           ) : (
@@ -275,13 +332,15 @@ export default function ExperienceLandingPage() {
         <div
           style={{
             borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.15)",
-            padding: 14,
+            border: "1px solid rgba(0,0,0,0.12)",
+            padding: 16,
             background: "white",
           }}
         >
-          <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>Status</div>
-          <div style={{ fontSize: 14, lineHeight: 1.35 }}>
+          <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 6, textTransform: "uppercase" }}>
+            Status
+          </div>
+          <div style={{ fontSize: 14, lineHeight: 1.4 }}>
             Você está na experiência <b>{exp.slug}</b>.
             <div style={{ marginTop: 6, fontSize: 13, opacity: 0.75 }}>
               (Login e passe serão verificados ao entrar na Journey.)
@@ -296,12 +355,12 @@ export default function ExperienceLandingPage() {
         <div
           style={{
             borderRadius: 16,
-            border: "1px solid rgba(0,0,0,0.15)",
-            padding: 14,
+            border: "1px solid rgba(0,0,0,0.12)",
+            padding: 16,
             background: "white",
           }}
         >
-          <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 6 }}>
+          <div style={{ fontSize: 12, opacity: 0.65, marginBottom: 8, textTransform: "uppercase" }}>
             Experimente grátis
           </div>
 
@@ -311,16 +370,16 @@ export default function ExperienceLandingPage() {
               onClick={() => togglePreview(previewUrl)}
               style={{
                 width: "100%",
-                height: 52,
+                height: 54,
                 borderRadius: 16,
                 border: "1px solid rgba(0,0,0,0.15)",
                 background: "white",
                 fontSize: 16,
                 cursor: "pointer",
-                fontWeight: 800,
+                fontWeight: 900,
               }}
             >
-              {previewPlaying ? "Pausar prévia" : "Ouvir prévia (1 min)"}
+              {previewPlaying ? "Pausar prévia" : previewLabel}
             </button>
           ) : (
             <div style={{ fontSize: 13, opacity: 0.65 }}>
@@ -337,12 +396,13 @@ export default function ExperienceLandingPage() {
           <button
             style={{
               flex: 1,
-              height: 52,
+              height: 54,
               borderRadius: 16,
               border: "1px solid rgba(0,0,0,0.15)",
               background: "white",
-              fontWeight: 900,
+              fontWeight: 950,
               cursor: "pointer",
+              letterSpacing: 0.2,
             }}
             onClick={() => {
               stopPreview();
@@ -354,7 +414,7 @@ export default function ExperienceLandingPage() {
 
           <button
             style={{
-              height: 52,
+              height: 54,
               borderRadius: 16,
               border: "1px solid rgba(0,0,0,0.12)",
               background: "rgba(0,0,0,0.04)",
@@ -383,6 +443,7 @@ export default function ExperienceLandingPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        background: "rgba(0,0,0,0.02)",
       }}
     >
       <div
@@ -396,6 +457,7 @@ export default function ExperienceLandingPage() {
           display: "flex",
           flexDirection: "column",
           gap: 12,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
         }}
       >
         {blocks.map((b, i) => (
