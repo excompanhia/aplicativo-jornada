@@ -16,21 +16,38 @@ export async function GET(
 
     const { slug } = await context.params;
 
-    const { data, error } = await supabase
+    // 1) valida experiência publicada/ativa (como já era)
+    const { data: exp, error: expErr } = await supabase
       .from("experiences")
       .select("id, slug, title, is_active")
       .eq("slug", slug)
       .eq("is_active", true)
       .maybeSingle();
 
-    if (error || !data) {
+    if (expErr || !exp) {
       return NextResponse.json(
         { ok: false, error: "not_found_or_not_published" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ ok: true, experience: data });
+    // 2) tenta buscar landing (se não existir ainda, tudo bem)
+    const { data: landing, error: landErr } = await supabase
+      .from("experience_landings")
+      .select(
+        "logo_url, headline, description, free_preview_audio_url, free_preview_duration_seconds, blocks_order"
+      )
+      .eq("experience_id", exp.id)
+      .maybeSingle();
+
+    // se der erro na landing, não derruba a experiência (fallback conservador)
+    const safeLanding = landErr ? null : landing;
+
+    return NextResponse.json({
+      ok: true,
+      experience: exp,
+      landing: safeLanding,
+    });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: err?.message || "unknown error" },
