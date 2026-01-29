@@ -73,8 +73,79 @@ export default function JourneyBySlugPage() {
     router.replace(`/journey/${encodeURIComponent(slug)}/landing`);
   }, [state.status, play, slug, router]);
 
-  if (state.status === "loading") return null;
-  if (state.status === "blocked") return null;
+  // ✅ AGORA MOSTRA UI (para não ficar “tela branca”)
+  if (state.status === "loading") {
+    return (
+      <main
+        style={{
+          padding: 16,
+          minHeight: "70vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 520,
+            width: "100%",
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 18,
+            padding: 16,
+            background: "white",
+          }}
+        >
+          <strong>Carregando experiência…</strong>
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+            (Se isso não sair do lugar, o app não está conseguindo validar o slug no
+            servidor.)
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (state.status === "blocked") {
+    return (
+      <main
+        style={{
+          padding: 16,
+          minHeight: "70vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 520,
+            width: "100%",
+            border: "1px solid rgba(0,0,0,0.12)",
+            borderRadius: 18,
+            padding: 16,
+            background: "white",
+          }}
+        >
+          <strong>Experiência indisponível</strong>
+          <div style={{ marginTop: 8, fontSize: 13, opacity: 0.7 }}>
+            Este slug não está publicado/ativo (ou não existe).
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 13, opacity: 0.8 }}>
+            Slug: <b>{slug || "(vazio)"}</b>
+          </div>
+
+          <button
+            style={{ marginTop: 12 }}
+            onClick={() => router.replace(`/journey/${encodeURIComponent(slug)}/landing`)}
+            disabled={!slug}
+          >
+            Tentar abrir a landing
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (!play) return null;
 
