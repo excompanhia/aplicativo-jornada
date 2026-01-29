@@ -40,13 +40,23 @@ export async function GET(
       .eq("experience_id", exp.id)
       .maybeSingle();
 
-    // se der erro na landing, não derruba a experiência (fallback conservador)
     const safeLanding = landErr ? null : landing;
+
+    // 3) busca stations da experiência (ordenadas)
+    const { data: stations, error: stErr } = await supabase
+      .from("experience_stations")
+      .select("id, position, title, text, images, audio_url")
+      .eq("experience_id", exp.id)
+      .order("position", { ascending: true });
+
+    // fallback conservador: se der erro, manda lista vazia
+    const safeStations = stErr || !stations ? [] : stations;
 
     return NextResponse.json({
       ok: true,
       experience: exp,
       landing: safeLanding,
+      stations: safeStations,
     });
   } catch (err: any) {
     return NextResponse.json(
