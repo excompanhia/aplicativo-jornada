@@ -3,9 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-// ✅ Fallback técnico (TEMPORÁRIO) — será removido antes da produção final
-import { stations as fallbackStations } from "../lib/stations";
-
 import { collectStationAssets } from "@/app/lib/preloadStations";
 import { preloadAssets } from "@/app/lib/preloadRunner";
 import {
@@ -45,6 +42,11 @@ type JourneyStation = {
   audioSrc: string;
 };
 
+type JourneyLoadState =
+  | { status: "loading" }
+  | { status: "ready" }
+  | { status: "blocked"; message: string };
+
 function safeLocalGet(key: string) {
   try {
     return window.localStorage.getItem(key);
@@ -79,7 +81,9 @@ function getOrCreateAnonId() {
     // navegadores modernos
     // @ts-ignore
     id =
-      typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "";
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : "";
   } catch {}
 
   if (!id) {
@@ -95,18 +99,19 @@ function readTrackingFromUrl() {
   // aceita vários nomes para facilitar sua vida na hora de criar QR
   const params = new URLSearchParams(window.location.search);
 
-  const experience_id =
-    (params.get("exp") ||
-      params.get("experience_id") ||
-      params.get("experience") ||
-      "default"
-    ).trim();
+  const experience_id = (
+    params.get("exp") ||
+    params.get("experience_id") ||
+    params.get("experience") ||
+    "default"
+  ).trim();
 
-  const qr_point_id =
-    (params.get("qr") ||
-      params.get("qr_point_id") ||
-      params.get("point") ||
-      "").trim();
+  const qr_point_id = (
+    params.get("qr") ||
+    params.get("qr_point_id") ||
+    params.get("point") ||
+    ""
+  ).trim();
 
   return { experience_id, qr_point_id };
 }
@@ -125,35 +130,64 @@ function getExperienceIdForAnalytics() {
 export default function JourneyPage() {
   const router = useRouter();
 
-  // ✅ NOVO: stations da Journey agora podem vir do Supabase (por slug)
-  // fallbackStations = airbag técnico temporário (será removido antes da produção final)
-  const [stations, setStations] = useState<JourneyStation[]>(
-    (fallbackStations as unknown as JourneyStation[]) || []
-  );
+  // ✅ Agora a Journey NÃO começa com conteúdo de fallback.
+  // Se não houver stations publicadas para o slug, a Journey não entra.
+  const [stations, setStations] = useState<JourneyStation[]>([]);
+  const [loadState, setLoadState] = useState<JourneyLoadState>({
+    status: "loading",
+  });
 
-  // ✅ NOVO: tenta carregar stations reais da experiência atual (slug)
+  // ✅ Carrega stations reais da experiência atual (slug)
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE);
-    if (!slug || !slug.trim()) return;
+    if (!slug || !slug.trim()) {
+      setLoadState({
+        status: "blocked",
+        message:
+          "Não foi possível identificar esta experiência. Volte e escaneie o QR Code novamente.",
+      });
+      return;
+    }
 
     let cancelled = false;
 
     (async () => {
       try {
-        const res = await fetch(`/api/experiences/${encodeURIComponent(slug.trim())}`, {
-          method: "GET",
-          cache: "no-store",
-        });
+        const res = await fetch(
+          `/api/experiences/${encodeURIComponent(slug.trim())}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          }
+        );
 
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (!cancelled) {
+            setLoadState({
+              status: "blocked",
+              message:
+                "Esta experiência não está publicada (ou não existe). Volte e tente novamente.",
+            });
+          }
+          return;
+        }
 
         const json = await res.json().catch(() => null);
         const list = json?.stations;
 
-        // Se não vier stations, mantém o fallback técnico (por enquanto)
-        if (!Array.isArray(list) || list.length === 0) return;
+        // ✅ Regra nova: se não vier stations publicadas, NÃO entra na Journey.
+        if (!Array.isArray(list) || list.length === 0) {
+          if (!cancelled) {
+            setLoadState({
+              status: "blocked",
+              message:
+                "Esta experiência ainda não tem conteúdo publicado. Volte para a página inicial desta jornada.",
+            });
+          }
+          return;
+        }
 
         // Converte no formato interno que a Journey usa
         const mapped: JourneyStation[] = list
@@ -161,18 +195,36 @@ export default function JourneyPage() {
             id: String(s?.id || ""),
             title: String(s?.title || ""),
             text: String(s?.text || ""),
-            images: Array.isArray(s?.images) ? s.images.map((x: any) => String(x)) : [],
+            images: Array.isArray(s?.images)
+              ? s.images.map((x: any) => String(x))
+              : [],
             audioSrc: String(s?.audio_url || ""),
           }))
           .filter((s) => s.id && s.title && s.audioSrc);
 
-        if (mapped.length === 0) return;
+        if (mapped.length === 0) {
+          if (!cancelled) {
+            setLoadState({
+              status: "blocked",
+              message:
+                "Esta experiência não tem estações válidas publicadas. Volte e tente novamente.",
+            });
+          }
+          return;
+        }
 
         if (!cancelled) {
           setStations(mapped);
+          setLoadState({ status: "ready" });
         }
       } catch {
-        // fallback técnico silencioso (não quebra a experiência)
+        if (!cancelled) {
+          setLoadState({
+            status: "blocked",
+            message:
+              "Não foi possível carregar esta experiência agora. Tente novamente em alguns instantes.",
+          });
+        }
       }
     })();
 
@@ -295,10 +347,11 @@ export default function JourneyPage() {
     } catch {}
   }, []);
 
-  // ✅ restaura após reload (ou primeira entrada)
+  // ✅ restaura após reload (ou primeira entrada) — só quando a experiência já carregou
   const restoredOnceRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (loadState.status !== "ready") return;
     if (restoredOnceRef.current) return;
     restoredOnceRef.current = true;
 
@@ -326,7 +379,7 @@ export default function JourneyPage() {
       }
     }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadState.status]);
 
   // ✅ salva continuamente enquanto toca
   useEffect(() => {
@@ -385,6 +438,7 @@ export default function JourneyPage() {
   // =========================
   const preloadStartedRef = useRef(false);
   useEffect(() => {
+    if (loadState.status !== "ready") return;
     if (preloadStartedRef.current) return;
     preloadStartedRef.current = true;
 
@@ -430,7 +484,7 @@ export default function JourneyPage() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadState.status]);
 
   // track atual
   const track: EngineTrack | null = useMemo(() => {
@@ -541,6 +595,60 @@ export default function JourneyPage() {
 
     startX.current = null;
     deltaX.current = 0;
+  }
+
+  // ✅ Tela simples quando a Journey não pode entrar
+  if (loadState.status === "loading") return null;
+
+  if (loadState.status === "blocked") {
+    return (
+      <AccessGuard>
+        <main
+          style={{
+            padding: 18,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 18,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "white",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 800 }}>
+              Esta jornada ainda não está pronta
+            </div>
+
+            <div style={{ fontSize: 13, opacity: 0.8, lineHeight: 1.45 }}>
+              {loadState.message}
+            </div>
+
+            <button
+              type="button"
+              onClick={exitToLanding}
+              style={{
+                height: 44,
+                borderRadius: 14,
+                border: "1px solid rgba(0,0,0,0.15)",
+                background: "white",
+                fontWeight: 700,
+                cursor: "pointer",
+                marginTop: 4,
+              }}
+            >
+              Voltar
+            </button>
+          </div>
+        </main>
+      </AccessGuard>
+    );
   }
 
   return (
