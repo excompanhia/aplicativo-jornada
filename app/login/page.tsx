@@ -27,7 +27,10 @@ function readTrackingFromUrl() {
     ""
   ).trim();
 
-  return { experience_id, qr_point_id };
+  // ✅ NOVO: next (para retorno pós-login)
+  const next = (params.get("next") || "").trim();
+
+  return { experience_id, qr_point_id, next };
 }
 
 export default function LoginPage() {
@@ -35,7 +38,7 @@ export default function LoginPage() {
 
   const tracking = useMemo(() => {
     if (typeof window === "undefined") {
-      return { experience_id: "audiowalk1", qr_point_id: "" };
+      return { experience_id: "audiowalk1", qr_point_id: "", next: "" };
     }
     return readTrackingFromUrl();
   }, []);
@@ -46,12 +49,18 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   function goAfterLogin() {
-    // ✅ pós-login sempre volta para a experiência correta por slug
+    // ✅ PRIORIDADE: se existir `next`, volta exatamente para ele
+    if (tracking.next) {
+      router.replace(tracking.next);
+      return;
+    }
+
+    // ✅ fallback atual (comportamento preservado)
     const slug = tracking.experience_id || "audiowalk1";
     router.replace(`/journey/${encodeURIComponent(slug)}`);
   }
 
-  // Se já estiver logado, volta pro Journey (slug)
+  // Se já estiver logado, respeita `next` (se existir)
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -73,11 +82,15 @@ export default function LoginPage() {
 
     const slug = tracking.experience_id || "audiowalk1";
 
+    // ✅ emailRedirectTo respeita `next` quando existir
+    const redirectTo = tracking.next
+      ? `${window.location.origin}${tracking.next}`
+      : `${window.location.origin}/journey/${encodeURIComponent(slug)}`;
+
     const { error } = await supabase.auth.signInWithOtp({
       email: e,
       options: {
-        // ✅ Depois do clique no e-mail, volta para a experiência (slug)
-        emailRedirectTo: `${window.location.origin}/journey/${encodeURIComponent(slug)}`,
+        emailRedirectTo: redirectTo,
       },
     });
 
