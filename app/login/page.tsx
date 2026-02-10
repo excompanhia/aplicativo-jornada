@@ -27,10 +27,20 @@ function readTrackingFromUrl() {
     ""
   ).trim();
 
-  // ✅ NOVO: next (para retorno pós-login)
+  // ✅ next (para retorno pós-login)
   const next = (params.get("next") || "").trim();
 
   return { experience_id, qr_point_id, next };
+}
+
+// ✅ Segurança e sanidade: só aceitamos next interno (começa com "/")
+function getSafeNext(rawNext: string): string {
+  const n = (rawNext || "").trim();
+  if (!n) return "";
+  if (!n.startsWith("/")) return "";
+  // opcional: impedir "///" e coisas estranhas
+  if (n.startsWith("//")) return "";
+  return n;
 }
 
 export default function LoginPage() {
@@ -49,9 +59,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   function goAfterLogin() {
+    const safeNext = getSafeNext(tracking.next);
+
     // ✅ PRIORIDADE: se existir `next`, volta exatamente para ele
-    if (tracking.next) {
-      router.replace(tracking.next);
+    if (safeNext) {
+      router.replace(safeNext);
       return;
     }
 
@@ -81,10 +93,11 @@ export default function LoginPage() {
     }
 
     const slug = tracking.experience_id || "audiowalk1";
+    const safeNext = getSafeNext(tracking.next);
 
-    // ✅ emailRedirectTo respeita `next` quando existir
-    const redirectTo = tracking.next
-      ? `${window.location.origin}${tracking.next}`
+    // ✅ emailRedirectTo respeita `next` quando existir (somente interno)
+    const redirectTo = safeNext
+      ? `${window.location.origin}${safeNext}`
       : `${window.location.origin}/journey/${encodeURIComponent(slug)}`;
 
     const { error } = await supabase.auth.signInWithOtp({
