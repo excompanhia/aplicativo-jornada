@@ -57,7 +57,11 @@ export async function POST(req: Request) {
     const metadata = payment.metadata || {};
 
     const userId = metadata.user_id;
+
+    // metadata.seconds vem como "segundos"
     const durationMinutes = Number(metadata.seconds) / 60;
+
+    // ✅ este é o vínculo do passe com a experiência (hoje: slug = experiência publicada)
     const experienceId = String(metadata.experience_id || "").trim();
 
     if (!userId || !durationMinutes || !experienceId) {
@@ -72,7 +76,7 @@ export async function POST(req: Request) {
     const nowIso = new Date().toISOString();
     const expiresAt = addSeconds(nowIso, durationMinutes * 60);
 
-    // 2) Expira passes ativos anteriores
+    // 2) Expira passes ativos anteriores (regra atual: 1 passe ativo por vez)
     await supabase
       .from("passes")
       .update({ status: "expired" })
@@ -88,6 +92,9 @@ export async function POST(req: Request) {
       expires_at: expiresAt,
       payment_provider: "mercadopago",
       payment_id: String(paymentId),
+
+      // ✅ NOVO: grava a experiência do passe
+      experience_id: experienceId,
     });
 
     // 4) 🔥 REGISTRA EVENTO DE COMPRA (ANALYTICS)
