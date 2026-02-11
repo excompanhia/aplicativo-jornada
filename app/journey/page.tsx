@@ -315,6 +315,32 @@ export default function JourneyPage() {
     safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
   }
 
+  // ✅ FIX CRÍTICO: ao mudar de estação, NÃO herdar o seek anterior.
+  // - pausa sempre
+  // - limpa seek anterior
+  // - aplica o seek salvo daquela estação (ou 0)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (loadState.status !== "ready") return;
+    if (!current?.id) return;
+
+    // sempre começa pausado ao trocar de estação
+    safeSet(KEY_PLAYING, "false");
+    setPauseSignal((n) => n + 1);
+
+    // limpa “sobras” do seek anterior
+    setSeekTo(null);
+
+    // aplica posição salva da estação atual (se existir), senão 0
+    window.setTimeout(() => {
+      const rawPos = safeGet(KEY_POS_PREFIX + current.id);
+      const pos = rawPos ? Number(rawPos) : 0;
+      const safePos = Number.isFinite(pos) ? Math.max(0, pos) : 0;
+      setSeekTo(safePos);
+    }, 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, loadState.status]);
+
   // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
   const analyticsStartedRef = useRef(false);
   useEffect(() => {
