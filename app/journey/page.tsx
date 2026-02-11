@@ -78,7 +78,6 @@ function getOrCreateAnonId() {
 
   let id = "";
   try {
-    // navegadores modernos
     // @ts-ignore
     id =
       typeof crypto !== "undefined" && crypto.randomUUID
@@ -87,7 +86,6 @@ function getOrCreateAnonId() {
   } catch {}
 
   if (!id) {
-    // fallback simples
     id = `anon_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 
@@ -96,7 +94,6 @@ function getOrCreateAnonId() {
 }
 
 function readTrackingFromUrl() {
-  // aceita vários nomes para facilitar sua vida na hora de criar QR
   const params = new URLSearchParams(window.location.search);
 
   const experience_id = (
@@ -116,7 +113,6 @@ function readTrackingFromUrl() {
   return { experience_id, qr_point_id };
 }
 
-// ✅ fonte de verdade do experience_id para analytics
 function getExperienceIdForAnalytics() {
   const fromLocal = safeLocalGet(KEY_CURRENT_EXPERIENCE);
   if (fromLocal && fromLocal.trim()) return fromLocal.trim();
@@ -130,8 +126,6 @@ function getExperienceIdForAnalytics() {
 export default function JourneyPage() {
   const router = useRouter();
 
-  // ✅ Agora a Journey NÃO começa com conteúdo de fallback.
-  // Se não houver stations publicadas para o slug, a Journey não entra.
   const [stations, setStations] = useState<JourneyStation[]>([]);
   const [loadState, setLoadState] = useState<JourneyLoadState>({
     status: "loading",
@@ -177,7 +171,6 @@ export default function JourneyPage() {
         const json = await res.json().catch(() => null);
         const list = json?.stations;
 
-        // ✅ Regra nova: se não vier stations publicadas, NÃO entra na Journey.
         if (!Array.isArray(list) || list.length === 0) {
           if (!cancelled) {
             setLoadState({
@@ -189,7 +182,6 @@ export default function JourneyPage() {
           return;
         }
 
-        // Converte no formato interno que a Journey usa
         const mapped: JourneyStation[] = list
           .map((s: any) => ({
             id: String(s?.id || ""),
@@ -233,7 +225,7 @@ export default function JourneyPage() {
     };
   }, []);
 
-  // ✅ Garante index válido quando stations mudam (evita crash)
+  // ✅ index válido
   const [index, setIndex] = useState(0);
   useEffect(() => {
     setIndex((v) => {
@@ -244,7 +236,6 @@ export default function JourneyPage() {
 
   const current = stations[index];
 
-  // ✅ Biblioteca overlay
   const [showLibrary, setShowLibrary] = useState(false);
 
   // swipe
@@ -253,7 +244,7 @@ export default function JourneyPage() {
   const [dragX, setDragX] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
 
-  // ✅ BLOCO 3: UI do preload
+  // preload UI
   const [preloadUi, setPreloadUi] = useState<PreloadUiState>({
     status: "idle",
   });
@@ -269,27 +260,22 @@ export default function JourneyPage() {
     paused: true,
   });
 
-  // AudioEngine signals
+  // signals
   const [playSignal, setPlaySignal] = useState(0);
   const [pauseSignal, setPauseSignal] = useState(0);
   const [seekTo, setSeekTo] = useState<number | null>(null);
 
-  // refs do último estado (pra salvar “na marra” mesmo se tudo estiver mudando)
+  // refs
   const latestIndexRef = useRef(0);
-  const latestStationIdRef = useRef<string | null>(null);
   const latestTimeRef = useRef(0);
   const latestPausedRef = useRef(true);
 
-  // ✅ FIX: tempo por stationId (fonte de verdade para salvar/restaurar)
+  // ✅ FIX: tempo por stationId (fonte de verdade)
   const timeByStationIdRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     latestIndexRef.current = index;
   }, [index]);
-
-  useEffect(() => {
-    latestStationIdRef.current = current?.id ?? null;
-  }, [current?.id]);
 
   useEffect(() => {
     latestTimeRef.current = playerState.currentTime || 0;
@@ -309,11 +295,10 @@ export default function JourneyPage() {
     }
   }
 
-  function saveSnapshot() {
-    const stationId = latestStationIdRef.current;
+  // ✅ FIX: salvar sempre explicitando QUAL estação estamos salvando
+  function saveSnapshotForStation(stationId: string | null) {
     if (!stationId) return;
 
-    // ✅ FIX: usa o tempo por stationId (mais confiável do que um “último tempo” genérico)
     const t =
       typeof timeByStationIdRef.current[stationId] === "number"
         ? timeByStationIdRef.current[stationId]
@@ -324,7 +309,30 @@ export default function JourneyPage() {
     safeSet(KEY_POS_PREFIX + stationId, String(t || 0));
   }
 
-  // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
+  // ✅ FIX PRINCIPAL: sempre que a estação mudar, pausar e aplicar seek do tempo salvo daquela estação
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (loadState.status !== "ready") return;
+    if (!current?.id) return;
+
+    // 1) sempre pausa ao entrar numa estação (o usuário decide dar play)
+    setPauseSignal((v) => v + 1);
+    safeSet(KEY_PLAYING, "false");
+
+    // 2) pega tempo salvo dessa estação (ou 0)
+    const raw = safeGet(KEY_POS_PREFIX + current.id);
+    const n = raw ? Number(raw) : 0;
+    const pos = Number.isFinite(n) ? Math.max(0, n) : 0;
+
+    // 3) aplica seek (com um micro delay para garantir que o track novo já carregou)
+    window.setTimeout(() => {
+      setSeekTo(pos);
+    }, 60);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id, loadState.status]);
+
+  // analytics: qr_open
   const analyticsStartedRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -356,7 +364,7 @@ export default function JourneyPage() {
     } catch {}
   }, []);
 
-  // ✅ restaura após reload (ou primeira entrada) — só quando a experiência já carregou
+  // ✅ restaura após reload — só quando carregou
   const restoredOnceRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -369,24 +377,8 @@ export default function JourneyPage() {
     const safeIndex =
       Number.isFinite(n) ? Math.max(0, Math.min(stations.length - 1, n)) : 0;
 
-    const wasPlaying = safeGet(KEY_PLAYING) === "true";
-
     setIndex(safeIndex);
 
-    window.setTimeout(() => {
-      const st = stations[safeIndex];
-      if (!st?.id) return;
-
-      const rawPos = safeGet(KEY_POS_PREFIX + st.id);
-      const pos = rawPos ? Number(rawPos) : 0;
-      const safePos = Number.isFinite(pos) ? Math.max(0, pos) : 0;
-
-      setSeekTo(safePos);
-
-      if (wasPlaying) {
-        window.setTimeout(() => setPlaySignal((v) => v + 1), 250);
-      }
-    }, 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadState.status]);
 
@@ -395,27 +387,32 @@ export default function JourneyPage() {
     if (typeof window === "undefined") return;
 
     const id = window.setInterval(() => {
-      if (!latestPausedRef.current) saveSnapshot();
+      if (!latestPausedRef.current && current?.id) {
+        saveSnapshotForStation(current.id);
+      }
     }, 900);
 
     return () => window.clearInterval(id);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
 
   // ✅ salva em momentos críticos
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     function onPageHide() {
-      saveSnapshot();
+      saveSnapshotForStation(current?.id || null);
     }
     function onVis() {
-      if (document.visibilityState !== "visible") saveSnapshot();
+      if (document.visibilityState !== "visible") {
+        saveSnapshotForStation(current?.id || null);
+      }
     }
     function onOffline() {
-      saveSnapshot();
+      saveSnapshotForStation(current?.id || null);
     }
     function onOnline() {
-      saveSnapshot();
+      saveSnapshotForStation(current?.id || null);
     }
 
     window.addEventListener("pagehide", onPageHide);
@@ -430,21 +427,19 @@ export default function JourneyPage() {
       window.removeEventListener("online", onOnline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [current?.id]);
 
   // pausa global (aviso 5 min)
   useEffect(() => {
     return onPauseAudioNow(() => {
       safeSet(KEY_PLAYING, "false");
-      saveSnapshot();
+      saveSnapshotForStation(current?.id || null);
       setPauseSignal((n) => n + 1);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [current?.id]);
 
-  // =========================
-  // PRELOAD OFFLINE PROGRESSIVO (COM PERSISTÊNCIA) + UI (BLOCO 3)
-  // =========================
+  // preload
   const preloadStartedRef = useRef(false);
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -495,7 +490,7 @@ export default function JourneyPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadState.status]);
 
-  // track atual
+  // track
   const track: EngineTrack | null = useMemo(() => {
     if (!current) return null;
     return { id: current.id, title: current.title, audioSrc: current.audioSrc };
@@ -512,45 +507,36 @@ export default function JourneyPage() {
   }
 
   function goNext() {
-    saveSnapshot();
+    // salva a estação ATUAL antes de mudar
+    saveSnapshotForStation(current?.id || null);
     setPauseSignal((v) => v + 1);
     setIndex((v) => clampIndex(v + 1));
   }
 
   function goPrev() {
-    saveSnapshot();
+    saveSnapshotForStation(current?.id || null);
     setPauseSignal((v) => v + 1);
     setIndex((v) => clampIndex(v - 1));
   }
 
-  // ✅ Biblioteca: escolher estação
   function goToStation(targetIndex: number) {
     const safeIndex = clampIndex(targetIndex);
-
-    // comportamento igual a trocar de estação manualmente:
-    // salva estado e pausa antes de mudar
-    saveSnapshot();
+    saveSnapshotForStation(current?.id || null);
     setPauseSignal((v) => v + 1);
-
     setIndex(safeIndex);
     setShowLibrary(false);
   }
 
-  // ✅ Biblioteca: sair para landing
   function exitToLanding() {
-    // salva o estado atual antes de sair
-    saveSnapshot();
+    saveSnapshotForStation(current?.id || null);
     safeSet(KEY_PLAYING, "false");
     setPauseSignal((v) => v + 1);
 
-    // ✅ sai para a landing da experiência atual (slug)
     const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE);
     if (slug && slug.trim()) {
       router.replace(`/journey/${encodeURIComponent(slug.trim())}/landing`);
       return;
     }
-
-    // fallback conservador
     router.replace("/");
   }
 
@@ -606,7 +592,6 @@ export default function JourneyPage() {
     deltaX.current = 0;
   }
 
-  // ✅ Tela simples quando a Journey não pode entrar
   if (loadState.status === "loading") {
     return (
       <AccessGuard>
@@ -726,7 +711,6 @@ export default function JourneyPage() {
           <div style={{ width: 88 }} />
         </div>
 
-        {/* ✅ BLOCO 3: feedback visual do preload (discreto) */}
         {preloadUi.status !== "idle" && <PreloadBanner state={preloadUi} />}
 
         <div
@@ -751,17 +735,17 @@ export default function JourneyPage() {
             playerState={playerState}
             onPlay={() => {
               safeSet(KEY_PLAYING, "true");
-              saveSnapshot();
+              saveSnapshotForStation(current?.id || null);
               setPlaySignal((n) => n + 1);
             }}
             onPause={() => {
               safeSet(KEY_PLAYING, "false");
-              saveSnapshot();
+              saveSnapshotForStation(current?.id || null);
               setPauseSignal((n) => n + 1);
             }}
             onSeek={(t: number) => {
               setSeekTo(t);
-              window.setTimeout(() => saveSnapshot(), 120);
+              window.setTimeout(() => saveSnapshotForStation(current?.id || null), 120);
             }}
           />
         </div>
@@ -805,7 +789,6 @@ export default function JourneyPage() {
           onTimeUpdate={(s) => {
             setPlayerState(s);
 
-            // ✅ FIX: sempre registra o tempo do track atual por stationId
             if (track?.id) {
               timeByStationIdRef.current[track.id] =
                 typeof s.currentTime === "number" && Number.isFinite(s.currentTime)
@@ -818,7 +801,6 @@ export default function JourneyPage() {
           requestSeekTo={seekTo}
         />
 
-        {/* ✅ Biblioteca Overlay */}
         {showLibrary && (
           <div
             style={{
@@ -845,7 +827,6 @@ export default function JourneyPage() {
                 flexDirection: "column",
               }}
             >
-              {/* Header: SAIR / CONTINUAR */}
               <div
                 style={{
                   padding: 12,
@@ -893,7 +874,6 @@ export default function JourneyPage() {
                 </button>
               </div>
 
-              {/* Lista */}
               <div style={{ padding: 12, overflow: "auto" }}>
                 <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 10 }}>
                   Escolha uma estação:
