@@ -76,11 +76,12 @@ export async function POST(req: Request) {
     const nowIso = new Date().toISOString();
     const expiresAt = addSeconds(nowIso, durationMinutes * 60);
 
-    // 2) Expira passes ativos anteriores (regra atual: 1 passe ativo por vez)
+    // 2) Expira passes ativos anteriores SOMENTE desta experiência (1 passe ativo por experiência)
     await supabase
       .from("passes")
       .update({ status: "expired" })
       .eq("user_id", userId)
+      .eq("experience_id", experienceId)
       .eq("status", "active");
 
     // 3) Cria novo passe
@@ -93,7 +94,7 @@ export async function POST(req: Request) {
       payment_provider: "mercadopago",
       payment_id: String(paymentId),
 
-      // ✅ NOVO: grava a experiência do passe
+      // ✅ grava a experiência do passe
       experience_id: experienceId,
     });
 

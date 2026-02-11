@@ -10,6 +10,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "missing_token" }, { status: 401 });
     }
 
+    // ✅ NOVO: a experiência atual (slug) vem por query ?exp=
+    const url = new URL(req.url);
+    const exp = (url.searchParams.get("exp") || "").trim();
+
+    if (!exp) {
+      return NextResponse.json({ ok: false, error: "missing_exp" }, { status: 400 });
+    }
+
     const supabase = getSupabaseAdmin();
 
     // 1) valida token e pega usuário
@@ -20,11 +28,15 @@ export async function GET(req: Request) {
 
     const uid = userData.user.id;
 
-    // 2) pega passe mais recente (não depende de RLS do client)
+    // 2) pega passe ativo mais recente PARA ESTA EXPERIÊNCIA (exp = slug)
     const { data, error } = await supabase
       .from("passes")
-      .select("id,user_id,status,duration_minutes,purchased_at,expires_at,payment_provider,payment_id")
+      .select(
+        "id,user_id,status,duration_minutes,purchased_at,expires_at,payment_provider,payment_id,experience_id"
+      )
       .eq("user_id", uid)
+      .eq("experience_id", exp)
+      .eq("status", "active")
       .order("expires_at", { ascending: false })
       .limit(1);
 

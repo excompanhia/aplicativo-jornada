@@ -12,6 +12,9 @@ type PassRow = {
   duration_minutes: number;
   purchased_at: string;
   expires_at: string;
+
+  // ✅ novo (se você passar a retornar isso do server)
+  experience_id?: string | null;
 };
 
 function formatMMSS(totalSeconds: number) {
@@ -66,7 +69,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const [pass, setPass] = useState<PassRow | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
 
-  // ✅ NOVO: mostrar "logado como: ..."
+  // ✅ mostrar "logado como: ..."
   const [userEmail, setUserEmail] = useState<string>("");
 
   const warnedRef = useRef(false);
@@ -103,14 +106,13 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   }
 
   function goLoginWithExp() {
-    // ✅ IMPORTANTÍSSIMO: sempre carregar o login AMARRADO ao slug atual
+    // ✅ sempre carregar o login amarrado ao slug atual
     const exp =
       expRef.current ||
       getJourneySlugFromPathname() ||
       getLastExpFallback();
 
-    // ✅ opcional (para futuro): “next” dizendo pra onde voltar
-    // aqui usamos a própria rota atual (journey do slug)
+    // ✅ “next” dizendo pra onde voltar (rota atual)
     let next = "";
     try {
       if (typeof window !== "undefined") {
@@ -142,48 +144,59 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ NOVO: guarda email para mostrar no app
+    // guarda email para mostrar no app
     setUserEmail(session.user?.email || "");
 
     const token = session.access_token;
 
-    // 2) consulta passe no servidor (não depende de RLS do client)
-    const res = await fetch("/api/auth/active-pass", {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
+    // ✅ pega a experiência (slug) atual
+    const exp =
+      expRef.current ||
+      getJourneySlugFromPathname() ||
+      getLastExpFallback();
+
+    if (!exp) {
+      setError("Não foi possível identificar esta experiência.");
+      return;
+    }
+
+    // 2) consulta passe no servidor (agora AMARRADO ao exp/slug)
+    const res = await fetch(
+      `/api/auth/active-pass?exp=${encodeURIComponent(exp)}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      }
+    );
 
     const json = await res.json().catch(() => null);
 
     if (!res.ok || !json?.ok) {
       setError(json?.error || "Erro ao verificar passe.");
-      // mantém loading aqui porque não temos estado seguro ainda
       return;
     }
 
     const row = json?.pass ? (json.pass as PassRow) : null;
 
     if (!row) {
-      // aqui é seguro expirar porque a resposta veio do servidor
       hasExpiryRef.current = true;
       goExpired();
       return;
     }
 
-    // ✅ A verdade do tempo é o expires_at do Supabase
+    // ✅ Fonte da verdade do tempo é expires_at do Supabase
     const expiraMs = new Date(row.expires_at).getTime();
     expiresAtMsRef.current = expiraMs;
     hasExpiryRef.current = true;
 
     const rest = computeRemainingFromExpiry();
 
-    // se por algum motivo ficou inválido no exato momento
     if (rest !== null && rest <= 0) {
       goExpired();
       return;
     }
 
-    // ✅ Agora a sessão está liberada. Não revalidamos novamente até sair da Journey.
+    // ✅ liberado. não revalidamos até sair da Journey.
     accessGrantedRef.current = true;
 
     setPass(row);
@@ -199,7 +212,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     tickRef.current = window.setInterval(() => {
       const next = computeRemainingFromExpiry();
 
-      // ainda não carregou a fonte da verdade -> não faz nada
       if (next === null) return;
 
       if (next <= 0) {
@@ -226,18 +238,14 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     expRef.current = slug;
     persistLastExp(slug);
 
-    // roda a validação e só depois liga o timer
     (async () => {
       await loadPassOnce();
       startTimerIfNeeded();
     })();
 
-    // ✅ Se o usuário saiu do app e voltou, recalcula imediatamente (sem “congelar” tempo)
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
         const next = computeRemainingFromExpiry();
-
-        // ainda não carregou -> não expira
         if (next === null) return;
 
         if (next <= 0) {
@@ -249,7 +257,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       }
     }
 
-    // ✅ Se voltou online, recalcula, mas NÃO mexe na UX (zero redirect / zero reset)
     function onOnline() {
       const next = computeRemainingFromExpiry();
       if (next === null) return;
@@ -276,11 +283,9 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     router.push(url);
   }
 
-  // ✅ Renovação: aqui a UX manda para o checkout (o webhook é quem soma tempo)
   function renewSamePlanHalfCheckout() {
     if (!pass) return;
 
-    // mapeia duration_minutes -> plano
     const mins = pass.duration_minutes;
     const plano: "1h" | "2h" | "day" =
       mins === 60 ? "1h" : mins === 120 ? "2h" : "day";
