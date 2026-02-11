@@ -32,8 +32,16 @@ export default function AudioEngine({
   // guardamos o src “real” em blob URL
   const objectUrlRef = useRef<string | null>(null);
 
-  // ✅ SEEK PENDENTE (aplica só quando metadata do novo track estiver pronta)
+  // ✅ garante que estados/seek não “vazem” entre tracks
+  const currentTrackIdRef = useRef<string>("");
+
+  // ✅ se o seek chegar antes do loadedmetadata, guardamos aqui
   const pendingSeekRef = useRef<number | null>(null);
+  const pendingSeekTrackIdRef = useRef<string>("");
+
+  // estado interno para UI / debug
+  const lastTimeRef = useRef(0);
+  const wasPlayingRef = useRef(false);
 
   function cleanupObjectUrl() {
     if (objectUrlRef.current) {
@@ -52,31 +60,52 @@ export default function AudioEngine({
     const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
     const paused = audio.paused;
 
+    lastTimeRef.current = currentTime;
+    wasPlayingRef.current = !paused;
+
     onTimeUpdate({ currentTime, duration, paused });
   }
 
-  function waitForLoadedMetadata(audio: HTMLAudioElement) {
-    // Se já carregou, não precisa esperar
-    if (Number.isFinite(audio.duration) && audio.duration > 0) return Promise.resolve();
+  function applyPendingSeekIfAny() {
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    return new Promise<void>((resolve) => {
-      const done = () => {
-        audio.removeEventListener("loadedmetadata", done);
-        audio.removeEventListener("loadeddata", done);
-        resolve();
-      };
-      audio.addEventListener("loadedmetadata", done, { once: true });
-      audio.addEventListener("loadeddata", done, { once: true });
-    });
+    // só aplica se o seek foi pedido para o track atual
+    if (
+      pendingSeekRef.current !== null &&
+      pendingSeekTrackIdRef.current &&
+      pendingSeekTrackIdRef.current === currentTrackIdRef.current
+    ) {
+      try {
+        audio.currentTime = Math.max(0, pendingSeekRef.current);
+      } catch {}
+
+      pendingSeekRef.current = null;
+      pendingSeekTrackIdRef.current = "";
+    }
   }
 
   async function loadTrackAsBlob(next: EngineTrack) {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // ✅ marca track atual (antes de mexer em src)
+    currentTrackIdRef.current = next.id;
+
+    // ✅ trava qualquer seek pendente antigo (de outro track)
+    if (pendingSeekTrackIdRef.current && pendingSeekTrackIdRef.current !== next.id) {
+      pendingSeekRef.current = null;
+      pendingSeekTrackIdRef.current = "";
+    }
+
     // pausa enquanto troca a fonte
     try {
       audio.pause();
+    } catch {}
+
+    // ✅ zera imediatamente para não “carregar tempo antigo” na UI
+    try {
+      audio.currentTime = 0;
     } catch {}
 
     // limpa blob anterior
@@ -90,25 +119,11 @@ export default function AudioEngine({
     const url = URL.createObjectURL(blob);
     objectUrlRef.current = url;
 
-    // Troca fonte
     audio.src = url;
     audio.load();
-
-    // ✅ espera metadata do NOVO áudio ficar pronta
-    await waitForLoadedMetadata(audio);
-
-    // ✅ aplica seek pendente AGORA (momento confiável)
-    if (pendingSeekRef.current !== null) {
-      try {
-        audio.currentTime = Math.max(0, pendingSeekRef.current);
-      } catch {}
-    }
-
-    // Emite estado final (com duration e currentTime corretos)
-    emitState();
   }
 
-  // ✅ Quando o track muda: carrega como blob e aplica seek pendente depois do metadata
+  // Quando track muda: carrega como blob (imune a rede)
   useEffect(() => {
     let cancelled = false;
 
@@ -118,9 +133,11 @@ export default function AudioEngine({
       try {
         await loadTrackAsBlob(track);
         if (cancelled) return;
+
+        // Emite estado (duration etc.). Mantém pausado por padrão.
+        emitState();
       } catch (e) {
         console.error("AudioEngine: erro ao carregar blob:", e);
-        emitState();
       }
     }
 
@@ -137,7 +154,13 @@ export default function AudioEngine({
     if (!audio) return;
 
     const onTime = () => emitState();
-    const onLoaded = () => emitState();
+
+    const onLoaded = () => {
+      // ✅ agora é seguro aplicar seek do track atual
+      applyPendingSeekIfAny();
+      emitState();
+    };
+
     const onPlay = () => emitState();
     const onPause = () => emitState();
     const onEnded = () => emitState();
@@ -158,24 +181,6 @@ export default function AudioEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Seek signal: vira "pendente" e aplica imediatamente se já estiver pronto
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (requestSeekTo === null) return;
-
-    pendingSeekRef.current = requestSeekTo;
-
-    // se já tem metadata, aplica na hora
-    if (Number.isFinite(audio.duration) && audio.duration > 0) {
-      try {
-        audio.currentTime = Math.max(0, requestSeekTo);
-      } catch {}
-      emitState();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestSeekTo]);
-
   // Play signal
   useEffect(() => {
     const audio = audioRef.current;
@@ -185,6 +190,7 @@ export default function AudioEngine({
     audio
       .play()
       .then(() => {
+        wasPlayingRef.current = true;
         emitState();
       })
       .catch((e) => {
@@ -202,9 +208,31 @@ export default function AudioEngine({
     try {
       audio.pause();
     } catch {}
+    wasPlayingRef.current = false;
     emitState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestPause]);
+
+  // Seek signal
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (requestSeekTo === null) return;
+    if (!track) return;
+
+    // ✅ guarda o seek para o track atual; se metadata já chegou, aplica na hora
+    pendingSeekRef.current = Math.max(0, requestSeekTo);
+    pendingSeekTrackIdRef.current = track.id;
+
+    try {
+      audio.currentTime = Math.max(0, requestSeekTo);
+    } catch {
+      // se falhar agora, vai ser aplicado no loadedmetadata
+    }
+
+    emitState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestSeekTo]);
 
   // cleanup ao desmontar
   useEffect(() => {
