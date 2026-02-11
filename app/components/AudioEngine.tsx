@@ -32,9 +32,8 @@ export default function AudioEngine({
   // guardamos o src “real” em blob URL
   const objectUrlRef = useRef<string | null>(null);
 
-  // estado interno para UI / debug
-  const lastTimeRef = useRef(0);
-  const wasPlayingRef = useRef(false);
+  // ✅ SEEK PENDENTE (aplica só quando metadata do novo track estiver pronta)
+  const pendingSeekRef = useRef<number | null>(null);
 
   function cleanupObjectUrl() {
     if (objectUrlRef.current) {
@@ -43,6 +42,32 @@ export default function AudioEngine({
       } catch {}
       objectUrlRef.current = null;
     }
+  }
+
+  function emitState() {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    const paused = audio.paused;
+
+    onTimeUpdate({ currentTime, duration, paused });
+  }
+
+  function waitForLoadedMetadata(audio: HTMLAudioElement) {
+    // Se já carregou, não precisa esperar
+    if (Number.isFinite(audio.duration) && audio.duration > 0) return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      const done = () => {
+        audio.removeEventListener("loadedmetadata", done);
+        audio.removeEventListener("loadeddata", done);
+        resolve();
+      };
+      audio.addEventListener("loadedmetadata", done, { once: true });
+      audio.addEventListener("loadeddata", done, { once: true });
+    });
   }
 
   async function loadTrackAsBlob(next: EngineTrack) {
@@ -65,25 +90,25 @@ export default function AudioEngine({
     const url = URL.createObjectURL(blob);
     objectUrlRef.current = url;
 
+    // Troca fonte
     audio.src = url;
     audio.load();
+
+    // ✅ espera metadata do NOVO áudio ficar pronta
+    await waitForLoadedMetadata(audio);
+
+    // ✅ aplica seek pendente AGORA (momento confiável)
+    if (pendingSeekRef.current !== null) {
+      try {
+        audio.currentTime = Math.max(0, pendingSeekRef.current);
+      } catch {}
+    }
+
+    // Emite estado final (com duration e currentTime corretos)
+    emitState();
   }
 
-  function emitState() {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
-    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
-    const paused = audio.paused;
-
-    lastTimeRef.current = currentTime;
-    wasPlayingRef.current = !paused;
-
-    onTimeUpdate({ currentTime, duration, paused });
-  }
-
-  // Quando track muda: carrega como blob (imune a rede)
+  // ✅ Quando o track muda: carrega como blob e aplica seek pendente depois do metadata
   useEffect(() => {
     let cancelled = false;
 
@@ -93,11 +118,9 @@ export default function AudioEngine({
       try {
         await loadTrackAsBlob(track);
         if (cancelled) return;
-
-        // Emite estado (duration etc.). Mantém pausado por padrão.
-        emitState();
       } catch (e) {
         console.error("AudioEngine: erro ao carregar blob:", e);
+        emitState();
       }
     }
 
@@ -135,6 +158,24 @@ export default function AudioEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ Seek signal: vira "pendente" e aplica imediatamente se já estiver pronto
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (requestSeekTo === null) return;
+
+    pendingSeekRef.current = requestSeekTo;
+
+    // se já tem metadata, aplica na hora
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      try {
+        audio.currentTime = Math.max(0, requestSeekTo);
+      } catch {}
+      emitState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestSeekTo]);
+
   // Play signal
   useEffect(() => {
     const audio = audioRef.current;
@@ -144,7 +185,6 @@ export default function AudioEngine({
     audio
       .play()
       .then(() => {
-        wasPlayingRef.current = true;
         emitState();
       })
       .catch((e) => {
@@ -162,23 +202,9 @@ export default function AudioEngine({
     try {
       audio.pause();
     } catch {}
-    wasPlayingRef.current = false;
     emitState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestPause]);
-
-  // Seek signal
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (requestSeekTo === null) return;
-
-    try {
-      audio.currentTime = Math.max(0, requestSeekTo);
-    } catch {}
-    emitState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestSeekTo]);
 
   // cleanup ao desmontar
   useEffect(() => {
