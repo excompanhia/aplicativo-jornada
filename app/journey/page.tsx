@@ -280,6 +280,9 @@ export default function JourneyPage() {
   const latestTimeRef = useRef(0);
   const latestPausedRef = useRef(true);
 
+  // ✅ FIX: tempo por stationId (fonte de verdade para salvar/restaurar)
+  const timeByStationIdRef = useRef<Record<string, number>>({});
+
   useEffect(() => {
     latestIndexRef.current = index;
   }, [index]);
@@ -310,36 +313,16 @@ export default function JourneyPage() {
     const stationId = latestStationIdRef.current;
     if (!stationId) return;
 
+    // ✅ FIX: usa o tempo por stationId (mais confiável do que um “último tempo” genérico)
+    const t =
+      typeof timeByStationIdRef.current[stationId] === "number"
+        ? timeByStationIdRef.current[stationId]
+        : latestTimeRef.current || 0;
+
     safeSet(KEY_INDEX, String(latestIndexRef.current));
     safeSet(KEY_PLAYING, String(!latestPausedRef.current));
-    safeSet(KEY_POS_PREFIX + stationId, String(latestTimeRef.current || 0));
+    safeSet(KEY_POS_PREFIX + stationId, String(t || 0));
   }
-
-  // ✅ FIX CRÍTICO: ao mudar de estação, NÃO herdar o seek anterior.
-  // - pausa sempre
-  // - limpa seek anterior
-  // - aplica o seek salvo daquela estação (ou 0)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (loadState.status !== "ready") return;
-    if (!current?.id) return;
-
-    // sempre começa pausado ao trocar de estação
-    safeSet(KEY_PLAYING, "false");
-    setPauseSignal((n) => n + 1);
-
-    // limpa “sobras” do seek anterior
-    setSeekTo(null);
-
-    // aplica posição salva da estação atual (se existir), senão 0
-    window.setTimeout(() => {
-      const rawPos = safeGet(KEY_POS_PREFIX + current.id);
-      const pos = rawPos ? Number(rawPos) : 0;
-      const safePos = Number.isFinite(pos) ? Math.max(0, pos) : 0;
-      setSeekTo(safePos);
-    }, 60);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, loadState.status]);
 
   // ✅ ANALYTICS: QR_OPEN (1 vez por sessão)
   const analyticsStartedRef = useRef(false);
@@ -819,7 +802,17 @@ export default function JourneyPage() {
 
         <AudioEngine
           track={track}
-          onTimeUpdate={setPlayerState}
+          onTimeUpdate={(s) => {
+            setPlayerState(s);
+
+            // ✅ FIX: sempre registra o tempo do track atual por stationId
+            if (track?.id) {
+              timeByStationIdRef.current[track.id] =
+                typeof s.currentTime === "number" && Number.isFinite(s.currentTime)
+                  ? s.currentTime
+                  : 0;
+            }
+          }}
           requestPlay={playSignal}
           requestPause={pauseSignal}
           requestSeekTo={seekTo}
