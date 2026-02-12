@@ -10,7 +10,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "missing_token" }, { status: 401 });
     }
 
-    // ✅ NOVO: a experiência atual (slug) vem por query ?exp=
+    // ✅ a experiência atual (slug) vem por query ?exp=
     const url = new URL(req.url);
     const exp = (url.searchParams.get("exp") || "").trim();
 
@@ -27,6 +27,35 @@ export async function GET(req: Request) {
     }
 
     const uid = userData.user.id;
+
+    // ✅ D2.3: validação automática da janela para iniciar
+    // Se existir purchased_not_started e now > start_deadline => virar expired_without_start
+    const { data: pendingData, error: pendingErr } = await supabase
+      .from("passes")
+      .select("id,start_deadline,status")
+      .eq("user_id", uid)
+      .eq("experience_id", exp)
+      .eq("status", "purchased_not_started")
+      .order("purchased_at", { ascending: false })
+      .limit(1);
+
+    if (!pendingErr) {
+      const pending = Array.isArray(pendingData) && pendingData.length > 0 ? pendingData[0] : null;
+
+      if (pending?.id && pending?.start_deadline) {
+        const deadlineMs = new Date(pending.start_deadline).getTime();
+        const nowMs = Date.now();
+
+        if (Number.isFinite(deadlineMs) && nowMs > deadlineMs) {
+          await supabase
+            .from("passes")
+            .update({
+              status: "expired_without_start",
+            })
+            .eq("id", pending.id);
+        }
+      }
+    }
 
     // 2) pega passe ativo mais recente PARA ESTA EXPERIÊNCIA (exp = slug)
     const { data, error } = await supabase
