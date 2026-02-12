@@ -6,10 +6,12 @@ import { NextResponse } from "next/server";
  *  - plan: "1h" | "2h" | "day"
  *  - experience_id: string
  *  - renewal?: boolean
+ *  - lifecycle_mode?: "legacy" | "new"   ✅ NOVO (controle do novo lifecycle)
  *  - Authorization: Bearer <access_token do Supabase>
  */
 
 type Plan = "1h" | "2h" | "day";
+type LifecycleMode = "legacy" | "new";
 
 // Detecta ambiente na Vercel de forma confiável
 function getVercelEnv(): "production" | "preview" | "development" | "unknown" {
@@ -102,6 +104,11 @@ export async function POST(req: Request) {
     const plan = body?.plan as Plan | undefined;
     const renewal = Boolean(body?.renewal);
     const experienceId = String(body?.experience_id || "").trim();
+
+    // ✅ NOVO: modo de lifecycle controlado explicitamente (padrão: legacy)
+    const lifecycleModeRaw = String(body?.lifecycle_mode || "legacy").trim();
+    const lifecycleMode: LifecycleMode =
+      lifecycleModeRaw === "new" ? "new" : "legacy";
 
     if (!plan || !["1h", "2h", "day"].includes(plan)) {
       return NextResponse.json(
@@ -225,6 +232,7 @@ export async function POST(req: Request) {
         plan,
         seconds: item.seconds,
         experience_id: experienceId, // ✅ CRÍTICO
+        lifecycle_mode: lifecycleMode, // ✅ NOVO (legacy por padrão)
         vercel_env: getVercelEnv(),
         is_renewal: renewal,
         discount_factor: renewal ? discountFactor : 0,
@@ -270,6 +278,7 @@ export async function POST(req: Request) {
       ok: true,
       checkoutUrl,
       preferenceId: mpJson?.id,
+      lifecycle_mode: lifecycleMode,
     });
   } catch (err: any) {
     return NextResponse.json(
