@@ -11,9 +11,10 @@ type PassRow = {
   status: string;
   duration_minutes: number;
   purchased_at: string;
-  expires_at: string;
+  expires_at: string | null;
+  start_deadline?: string | null;
+  started_at?: string | null;
 
-  // ✅ novo (se você passar a retornar isso do server)
   experience_id?: string | null;
 };
 
@@ -60,6 +61,24 @@ function getLastExpFallback(): string {
   } catch {
     return "";
   }
+}
+
+function formatDateBR(iso?: string | null) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function isMobileDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isTouch =
+    "ontouchstart" in window ||
+    (navigator as any).maxTouchPoints > 0 ||
+    (navigator as any).msMaxTouchPoints > 0;
+  const isMobileUA = /Android|iPhone|iPad|iPod/i.test(ua);
+  return isTouch && isMobileUA;
 }
 
 export default function AccessGuard({ children }: { children: ReactNode }) {
@@ -160,7 +179,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 2) consulta passe no servidor (agora AMARRADO ao exp/slug)
+    // 2) consulta passe no servidor (agora pode devolver ACTIVE ou PURCHASED_NOT_STARTED)
     const res = await fetch(
       `/api/auth/active-pass?exp=${encodeURIComponent(exp)}`,
       {
@@ -184,7 +203,21 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ Fonte da verdade do tempo é expires_at do Supabase
+    // ✅ NOVO: se comprou mas não iniciou, mostramos a TELA PRÉ-AUDIOWALK
+    if (row.status === "purchased_not_started") {
+      // Não inicia timer, não define expiresAt.
+      setPass(row);
+      setRemainingSeconds(0);
+      setLoading(false);
+      return;
+    }
+
+    // ✅ ACTIVE: Fonte da verdade do tempo é expires_at do Supabase
+    if (!row.expires_at) {
+      setError("Passe inválido: expires_at ausente.");
+      return;
+    }
+
     const expiraMs = new Date(row.expires_at).getTime();
     expiresAtMsRef.current = expiraMs;
     hasExpiryRef.current = true;
@@ -298,11 +331,153 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     router.push(url);
   }
 
+  async function startJourneyNow() {
+    setError(null);
+
+    // trava mobile-only aplicada no lugar certo: no INICIAR
+    if (!isMobileDevice()) {
+      setError("Para iniciar a experiência, use o celular.");
+      return;
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData.session;
+
+    if (!session) {
+      goLoginWithExp();
+      return;
+    }
+
+    const token = session.access_token;
+
+    const exp =
+      expRef.current ||
+      getJourneySlugFromPathname() ||
+      getLastExpFallback();
+
+    if (!exp) {
+      setError("Não foi possível identificar esta experiência.");
+      return;
+    }
+
+    const res = await fetch(`/api/passes/start?exp=${encodeURIComponent(exp)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok || !json?.ok) {
+      const err = json?.error || "Erro ao iniciar.";
+      // se janela expirou, manda para expired
+      if (err === "start_window_expired") {
+        hasExpiryRef.current = true;
+        goExpired();
+        return;
+      }
+      if (err === "already_active") {
+        const activeExp = json?.active?.experience_id;
+        if (activeExp) {
+          router.replace(`/journey/${encodeURIComponent(activeExp)}?play=1`);
+          return;
+        }
+      }
+      setError(err);
+      return;
+    }
+
+    const row = json?.pass ? (json.pass as PassRow) : null;
+    if (!row?.expires_at) {
+      setError("Início inválido: expires_at ausente.");
+      return;
+    }
+
+    // agora virou ACTIVE
+    const expiraMs = new Date(row.expires_at).getTime();
+    expiresAtMsRef.current = expiraMs;
+    hasExpiryRef.current = true;
+
+    const rest = computeRemainingFromExpiry();
+
+    accessGrantedRef.current = true;
+    setPass(row);
+    setRemainingSeconds(rest ?? 0);
+    setLoading(false);
+
+    startTimerIfNeeded();
+  }
+
   if (loading) {
     return (
       <main style={{ padding: 16 }}>
         Carregando acesso…
         {error && <div style={{ marginTop: 10, color: "crimson" }}>{error}</div>}
+      </main>
+    );
+  }
+
+  // ✅ TELA PRÉ-AUDIOWALK
+  if (pass?.status === "purchased_not_started") {
+    return (
+      <main style={{ padding: 16, maxWidth: 560, margin: "0 auto" }}>
+        <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 10 }}>
+          Você já tem este Audiowalk
+        </h1>
+
+        <div style={{ fontSize: 14, opacity: 0.85, lineHeight: 1.4 }}>
+          Você comprou e pode iniciar quando quiser.
+          {pass.start_deadline ? (
+            <>
+              <br />
+              <span>
+                Prazo para iniciar: <b>{formatDateBR(pass.start_deadline)}</b>
+              </span>
+            </>
+          ) : null}
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 12, color: "crimson", fontSize: 14 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
+          <button
+            type="button"
+            onClick={startJourneyNow}
+            style={{
+              width: "100%",
+              height: 54,
+              borderRadius: 16,
+              border: "1px solid rgba(0,0,0,0.15)",
+              background: "black",
+              color: "white",
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            Iniciar Audiowalk
+          </button>
+
+          <button
+            type="button"
+            onClick={() => router.replace(`/${encodeURIComponent(expRef.current || getLastExpFallback())}`)}
+            style={{
+              width: "100%",
+              height: 48,
+              borderRadius: 16,
+              border: "1px solid rgba(0,0,0,0.12)",
+              background: "rgba(0,0,0,0.04)",
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            Voltar
+          </button>
+        </div>
       </main>
     );
   }

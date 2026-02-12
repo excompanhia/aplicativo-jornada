@@ -10,7 +10,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "missing_token" }, { status: 401 });
     }
 
-    // ✅ a experiência atual (slug) vem por query ?exp=
+    // ✅ experiência atual por query ?exp=
     const url = new URL(req.url);
     const exp = (url.searchParams.get("exp") || "").trim();
 
@@ -28,9 +28,8 @@ export async function GET(req: Request) {
 
     const uid = userData.user.id;
 
-    // ✅ D2.3: validação automática da janela para iniciar
-    // Se existir purchased_not_started e now > start_deadline => virar expired_without_start
-    const { data: pendingData, error: pendingErr } = await supabase
+    // ✅ D2.3: auto-expirar purchased_not_started se passou do start_deadline
+    const { data: pendingCheck, error: pendingCheckErr } = await supabase
       .from("passes")
       .select("id,start_deadline,status")
       .eq("user_id", uid)
@@ -39,29 +38,27 @@ export async function GET(req: Request) {
       .order("purchased_at", { ascending: false })
       .limit(1);
 
-    if (!pendingErr) {
-      const pending = Array.isArray(pendingData) && pendingData.length > 0 ? pendingData[0] : null;
+    if (!pendingCheckErr) {
+      const pending =
+        Array.isArray(pendingCheck) && pendingCheck.length > 0 ? pendingCheck[0] : null;
 
       if (pending?.id && pending?.start_deadline) {
         const deadlineMs = new Date(pending.start_deadline).getTime();
         const nowMs = Date.now();
-
         if (Number.isFinite(deadlineMs) && nowMs > deadlineMs) {
           await supabase
             .from("passes")
-            .update({
-              status: "expired_without_start",
-            })
+            .update({ status: "expired_without_start" })
             .eq("id", pending.id);
         }
       }
     }
 
-    // 2) pega passe ativo mais recente PARA ESTA EXPERIÊNCIA (exp = slug)
-    const { data, error } = await supabase
+    // 2) tenta pegar passe ACTIVE mais recente para esta experiência
+    const { data: activeData, error: activeErr } = await supabase
       .from("passes")
       .select(
-        "id,user_id,status,duration_minutes,purchased_at,expires_at,payment_provider,payment_id,experience_id"
+        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id"
       )
       .eq("user_id", uid)
       .eq("experience_id", exp)
@@ -69,13 +66,37 @@ export async function GET(req: Request) {
       .order("expires_at", { ascending: false })
       .limit(1);
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (activeErr) {
+      return NextResponse.json({ ok: false, error: activeErr.message }, { status: 500 });
     }
 
-    const pass = Array.isArray(data) && data.length > 0 ? data[0] : null;
+    const activePass =
+      Array.isArray(activeData) && activeData.length > 0 ? activeData[0] : null;
 
-    return NextResponse.json({ ok: true, pass });
+    if (activePass) {
+      return NextResponse.json({ ok: true, pass: activePass });
+    }
+
+    // 3) se não tem ACTIVE, tenta devolver PURCHASED_NOT_STARTED (tela pré-Audiowalk)
+    const { data: pendingData, error: pendingErr } = await supabase
+      .from("passes")
+      .select(
+        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id"
+      )
+      .eq("user_id", uid)
+      .eq("experience_id", exp)
+      .eq("status", "purchased_not_started")
+      .order("purchased_at", { ascending: false })
+      .limit(1);
+
+    if (pendingErr) {
+      return NextResponse.json({ ok: false, error: pendingErr.message }, { status: 500 });
+    }
+
+    const pendingPass =
+      Array.isArray(pendingData) && pendingData.length > 0 ? pendingData[0] : null;
+
+    return NextResponse.json({ ok: true, pass: pendingPass || null });
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: e?.message || "unexpected_error" },
