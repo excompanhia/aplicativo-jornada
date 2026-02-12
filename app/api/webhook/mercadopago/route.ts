@@ -14,6 +14,10 @@ function addSeconds(baseIso: string, seconds: number) {
   return new Date(base + seconds * 1000).toISOString();
 }
 
+function addDays(baseIso: string, days: number) {
+  return addSeconds(baseIso, days * 24 * 60 * 60);
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -65,10 +69,10 @@ export async function POST(req: Request) {
     const experienceId = String(metadata.experience_id || "").trim();
 
     /**
-     * ✅ NOVO (D1): suporte ao modo "Compra ≠ Início" sem quebrar produção.
+     * ✅ NOVO (D1/D2): suporte ao modo "Compra ≠ Início" + "Janela para iniciar"
      *
      * - legacy (padrão): mantém comportamento atual (cria passe active + expires_at agora)
-     * - new: cria purchased_not_started (sem expires_at). O início real será feito no D3 (botão "Iniciar").
+     * - new: cria purchased_not_started (sem expires_at) + start_deadline (30 dias após compra)
      *
      * Importante: enquanto o app ainda depende do passe "active" para entrar,
      * NÃO devemos trocar o padrão para "new" aqui, senão quebramos a produção.
@@ -86,10 +90,17 @@ export async function POST(req: Request) {
 
     const nowIso = new Date().toISOString();
 
-    // Só calcula expiresAt no modo legacy (modelo antigo)
+    // legacy: define expires_at agora (modelo antigo)
+    // new: deixa null (o D3 criará started_at e expires_at)
     const expiresAt =
       lifecycleMode === "legacy"
         ? addSeconds(nowIso, durationMinutes * 60)
+        : null;
+
+    // ✅ D2 (decisão atual): janela fixa de 30 dias para iniciar (somente no modo new)
+    const startDeadline =
+      lifecycleMode === "new"
+        ? addDays(nowIso, 30)
         : null;
 
     // 2) Expira passes ativos anteriores SOMENTE desta experiência (1 passe ativo por experiência)
@@ -111,9 +122,13 @@ export async function POST(req: Request) {
       duration_minutes: durationMinutes,
       purchased_at: nowIso,
 
-      // legacy: define expires_at agora (modelo antigo)
-      // new: deixa null (o D3 criará started_at e expires_at)
+      // legacy: define expires_at agora
+      // new: null
       expires_at: expiresAt,
+
+      // new: start_deadline = compra + 30 dias
+      // legacy: null
+      start_deadline: startDeadline,
 
       payment_provider: "mercadopago",
       payment_id: String(paymentId),
