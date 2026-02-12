@@ -64,6 +64,17 @@ export async function POST(req: Request) {
     // ✅ este é o vínculo do passe com a experiência (hoje: slug = experiência publicada)
     const experienceId = String(metadata.experience_id || "").trim();
 
+    /**
+     * ✅ NOVO (D1): suporte ao modo "Compra ≠ Início" sem quebrar produção.
+     *
+     * - legacy (padrão): mantém comportamento atual (cria passe active + expires_at agora)
+     * - new: cria purchased_not_started (sem expires_at). O início real será feito no D3 (botão "Iniciar").
+     *
+     * Importante: enquanto o app ainda depende do passe "active" para entrar,
+     * NÃO devemos trocar o padrão para "new" aqui, senão quebramos a produção.
+     */
+    const lifecycleMode = String(metadata.lifecycle_mode || "legacy").trim();
+
     if (!userId || !durationMinutes || !experienceId) {
       return NextResponse.json(
         { ok: false, error: "metadata incomplete" },
@@ -74,9 +85,15 @@ export async function POST(req: Request) {
     const supabase = getSupabaseAdmin();
 
     const nowIso = new Date().toISOString();
-    const expiresAt = addSeconds(nowIso, durationMinutes * 60);
+
+    // Só calcula expiresAt no modo legacy (modelo antigo)
+    const expiresAt =
+      lifecycleMode === "legacy"
+        ? addSeconds(nowIso, durationMinutes * 60)
+        : null;
 
     // 2) Expira passes ativos anteriores SOMENTE desta experiência (1 passe ativo por experiência)
+    // (mantemos este comportamento por enquanto para não mudar produção no meio)
     await supabase
       .from("passes")
       .update({ status: "expired" })
@@ -84,13 +101,20 @@ export async function POST(req: Request) {
       .eq("experience_id", experienceId)
       .eq("status", "active");
 
-    // 3) Cria novo passe
+    // 3) Cria novo passe (legacy ou new)
     await supabase.from("passes").insert({
       user_id: userId,
-      status: "active",
+
+      // ✅ D1: compra confirmada NÃO precisa virar jornada/tempo automaticamente no novo modelo
+      status: lifecycleMode === "legacy" ? "active" : "purchased_not_started",
+
       duration_minutes: durationMinutes,
       purchased_at: nowIso,
+
+      // legacy: define expires_at agora (modelo antigo)
+      // new: deixa null (o D3 criará started_at e expires_at)
       expires_at: expiresAt,
+
       payment_provider: "mercadopago",
       payment_id: String(paymentId),
 
@@ -139,7 +163,7 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, lifecycle_mode: lifecycleMode });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: String(err?.message || err) },
