@@ -17,8 +17,9 @@ function CheckoutInner() {
   // plano escolhido
   const plano = searchParams.get("plano"); // "1h" | "2h" | "day"
 
-  // ✅ NOVO: experience_id vindo da URL
-  const exp = searchParams.get("exp"); // experience_id (string)
+  // ✅ experience_id vindo da URL
+  const expRaw = searchParams.get("exp"); // experience_id (string)
+  const exp = (expRaw || "").trim();
 
   const [isPaying, setIsPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +33,11 @@ function CheckoutInner() {
 
   async function handlePay() {
     setError(null);
+
+    if (!exp) {
+      setError("Experiência ausente. Volte para a landing e tente novamente.");
+      return;
+    }
 
     if (!plano || !["1h", "2h", "day"].includes(plano)) {
       setError("Selecione um plano primeiro.");
@@ -59,6 +65,7 @@ function CheckoutInner() {
       }
 
       // 2) Chama o servidor para criar o checkout do Mercado Pago
+      // ✅ Compra ≠ Início: força lifecycle_mode = "new"
       const res = await fetch("/api/mercadopago/checkout", {
         method: "POST",
         headers: {
@@ -67,7 +74,8 @@ function CheckoutInner() {
         },
         body: JSON.stringify({
           plan: plano,
-          experience_id: exp, // ✅ NOVO
+          experience_id: exp,
+          lifecycle_mode: "new",
         }),
       });
 
@@ -77,8 +85,7 @@ function CheckoutInner() {
         const msg =
           (json?.error ? String(json.error) : "Erro ao criar checkout.") +
           (json?.details
-            ? "\n\nDETAILS:\n" +
-              JSON.stringify(json.details, null, 2)
+            ? "\n\nDETAILS:\n" + JSON.stringify(json.details, null, 2)
             : "");
         setError(msg);
         return;
@@ -91,7 +98,9 @@ function CheckoutInner() {
 
       // 3) Abre o Mercado Pago
       window.open(json.checkoutUrl, "_blank", "noopener,noreferrer");
-      window.location.href = "/payment/pending";
+
+      // ✅ mantém exp no pending para polling correto
+      window.location.href = `/payment/pending?exp=${encodeURIComponent(exp)}`;
     } catch (e: any) {
       setError("Erro inesperado: " + String(e?.message || e));
     } finally {
@@ -117,12 +126,8 @@ function CheckoutInner() {
           padding: 16,
         }}
       >
-        <div style={{ fontSize: 13, opacity: 0.7 }}>
-          Plano selecionado
-        </div>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>
-          {planoTexto}
-        </div>
+        <div style={{ fontSize: 13, opacity: 0.7 }}>Plano selecionado</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{planoTexto}</div>
       </div>
 
       <button
@@ -147,16 +152,11 @@ function CheckoutInner() {
       )}
 
       <Link
-  href={
-    exp && exp.trim()
-      ? `/journey/${encodeURIComponent(exp.trim())}/landing`
-      : "/"
-  }
-  style={{ textDecoration: "none", textAlign: "center" }}
->
-  Voltar para a landing
-</Link>
-
+        href={exp ? `/journey/${encodeURIComponent(exp)}/landing` : "/"}
+        style={{ textDecoration: "none", textAlign: "center" }}
+      >
+        Voltar para a landing
+      </Link>
     </main>
   );
 }
@@ -164,11 +164,7 @@ function CheckoutInner() {
 export default function CheckoutPage() {
   return (
     <Suspense
-      fallback={
-        <main style={{ padding: 16 }}>
-          Carregando checkout…
-        </main>
-      }
+      fallback={<main style={{ padding: 16 }}>Carregando checkout…</main>}
     >
       <CheckoutInner />
     </Suspense>
