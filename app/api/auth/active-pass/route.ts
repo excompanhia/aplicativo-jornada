@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/app/lib/supabaseAdmin";
 
@@ -54,7 +55,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // ✅ 2) pega passe "ativo" para esta experiência (compatível: active OU journey_active)
+    // ✅ 2) pega passe "ativo" para esta experiência (status oficial)
     const { data: activeData, error: activeErr } = await supabase
       .from("passes")
       .select(
@@ -62,7 +63,7 @@ export async function GET(req: Request) {
       )
       .eq("user_id", uid)
       .eq("experience_id", exp)
-      .in("status", ["active", "journey_active"])
+      .in("status", ["journey_active"])
       .order("expires_at", { ascending: false })
       .limit(1);
 
