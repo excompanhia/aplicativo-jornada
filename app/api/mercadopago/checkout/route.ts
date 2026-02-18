@@ -75,11 +75,13 @@ async function fetchLatestActivePass(
   userId: string
 ) {
   const nowIso = new Date().toISOString();
+
+  // ✅ CORREÇÃO: não existe mais "active" — o passe em execução é "journey_active"
   const url =
     `${supabaseUrl}/rest/v1/passes` +
-    `?select=id,status,expires_at` +
+    `?select=id,status,expires_at,experience_id` +
     `&user_id=eq.${encodeURIComponent(userId)}` +
-    `&status=eq.active` +
+    `&status=eq.journey_active` +
     `&expires_at=gt.${encodeURIComponent(nowIso)}` +
     `&order=expires_at.desc` +
     `&limit=1`;
@@ -174,8 +176,7 @@ export async function POST(req: Request) {
         );
       }
 
-      const remainingMs =
-        new Date(pass.expires_at).getTime() - Date.now();
+      const remainingMs = new Date(pass.expires_at).getTime() - Date.now();
 
       if (!(remainingMs > 0 && remainingMs <= 5 * 60 * 1000)) {
         return NextResponse.json(
@@ -198,13 +199,12 @@ export async function POST(req: Request) {
     const item = planToItem(plan);
 
     const discountFactor = 0.5;
-    const unitPrice = renewal
-      ? round2(item.price * discountFactor)
-      : item.price;
+    const unitPrice = renewal ? round2(item.price * discountFactor) : item.price;
 
-    const title = renewal
-      ? `${item.title} — Renovação (-50%)`
-      : item.title;
+    const title = renewal ? `${item.title} — Renovação (-50%)` : item.title;
+
+    // ✅ CORREÇÃO: back_urls carregam contexto ?exp= (robustez)
+    const expQs = `?exp=${encodeURIComponent(experienceId)}`;
 
     const preferencePayload = {
       items: [
@@ -219,9 +219,9 @@ export async function POST(req: Request) {
       notification_url: `${siteUrl}/api/webhook/mercadopago`,
 
       back_urls: {
-        success: `${siteUrl}/payment/success`,
-        pending: `${siteUrl}/payment/pending`,
-        failure: `${siteUrl}/payment/failure`,
+        success: `${siteUrl}/payment/success${expQs}`,
+        pending: `${siteUrl}/payment/pending${expQs}`,
+        failure: `${siteUrl}/payment/failure${expQs}`,
       },
 
       auto_return: "approved",
