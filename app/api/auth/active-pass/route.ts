@@ -54,7 +54,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 2) tenta pegar passe ACTIVE mais recente para esta experiência
+    // 2) tenta pegar passe JOURNEY_ACTIVE mais recente para esta experiência
     const { data: activeData, error: activeErr } = await supabase
       .from("passes")
       .select(
@@ -62,7 +62,7 @@ export async function GET(req: Request) {
       )
       .eq("user_id", uid)
       .eq("experience_id", exp)
-      .eq("status", "active")
+      .eq("status", "journey_active")
       .order("expires_at", { ascending: false })
       .limit(1);
 
@@ -77,7 +77,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, pass: activePass });
     }
 
-    // 3) se não tem ACTIVE, tenta devolver PURCHASED_NOT_STARTED (tela pré-Audiowalk)
+    // 3) se não tem JOURNEY_ACTIVE, tenta devolver PURCHASED_NOT_STARTED (tela pré-Audiowalk)
     const { data: pendingData, error: pendingErr } = await supabase
       .from("passes")
       .select(

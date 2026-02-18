@@ -53,10 +53,10 @@ export default function PaymentPendingPage() {
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
 
-  // ✅ NOVO: contexto da experiência (slug)
+  // ✅ contexto da experiência (slug)
   const [exp, setExp] = useState<string>("");
 
-  // ✅ NOVO: quando não está logado, mostramos botão para login
+  // ✅ quando não está logado, mostramos botão para login
   const [needsLogin, setNeedsLogin] = useState(false);
 
   // ===== Polling progressivo (anti-enxame) =====
@@ -140,16 +140,19 @@ export default function PaymentPendingPage() {
 
       const userId = session.user.id;
 
-      // 2) Procura um passe ativo e ainda válido
+      // 2) Procura passe desta experiência:
+      //    - journey_active (válido) => pode entrar direto
+      //    - purchased_not_started => pagamento confirmado, mas ainda não iniciou
       const nowIso = new Date().toISOString();
+      const finalExp = exp || "audiowalk1";
 
       const { data, error: passErr } = await supabase
         .from("passes")
-        .select("id, status, expires_at")
+        .select("id, status, expires_at, experience_id")
         .eq("user_id", userId)
-        .eq("status", "active")
-        .gt("expires_at", nowIso)
-        .order("expires_at", { ascending: false })
+        .eq("experience_id", finalExp)
+        .in("status", ["journey_active", "purchased_not_started"])
+        .order("purchased_at", { ascending: false })
         .limit(1);
 
       setLastCheck(new Date().toLocaleTimeString());
@@ -160,11 +163,21 @@ export default function PaymentPendingPage() {
         return;
       }
 
-      if (data && data.length > 0) {
-        setStatusText("Pagamento confirmado! Liberando acesso…");
+      const row = Array.isArray(data) && data.length > 0 ? data[0] : null;
 
-        const finalExp = exp || "audiowalk1";
-        router.replace(`/journey/${encodeURIComponent(finalExp)}`);
+      if (row?.status === "journey_active") {
+        // se tiver expires_at e estiver válido, libera
+        if (row.expires_at && row.expires_at > nowIso) {
+          setStatusText("Pagamento confirmado! Liberando acesso…");
+          router.replace(`/journey/${encodeURIComponent(finalExp)}?play=1`);
+          return;
+        }
+      }
+
+      if (row?.status === "purchased_not_started") {
+        // pagamento confirmado no modo "new": manda para a tela pré-início
+        setStatusText("Pagamento confirmado! Preparando o início…");
+        router.replace(`/journey/${encodeURIComponent(finalExp)}/landing`);
         return;
       }
 
@@ -187,7 +200,7 @@ export default function PaymentPendingPage() {
   }
 
   useEffect(() => {
-    // ✅ NOVO: ler exp e persistir como fallback do app inteiro
+    // ✅ ler exp e persistir como fallback do app inteiro
     const expFromUrl = readExpFromUrl();
     const finalExp = expFromUrl || getLastExpFallback() || "audiowalk1";
 
@@ -217,7 +230,7 @@ export default function PaymentPendingPage() {
         {lastCheck ? `Última checagem: ${lastCheck}` : "Fazendo a primeira checagem…"}
       </div>
 
-      {/* ✅ contexto da experiência */}
+      {/* contexto da experiência */}
       <div
         style={{
           fontSize: 13,
@@ -237,7 +250,7 @@ export default function PaymentPendingPage() {
         </div>
       )}
 
-      {/* ✅ NOVO: botão de login quando não há sessão */}
+      {/* botão de login quando não há sessão */}
       {needsLogin && (
         <button
           onClick={goLogin}

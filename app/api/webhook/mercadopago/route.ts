@@ -14,7 +14,7 @@ function addSeconds(baseIso: string, seconds: number) {
   return new Date(base + seconds * 1000).toISOString();
 }
 
-// ✅ NOVA FUNÇÃO — Deadline fixado para 23:59:59 Brasil
+// ✅ Deadline fixado para 23:59:59 Brasil
 function calculateStartDeadlineBrasil(baseIso: string, windowDays: number) {
   const base = new Date(baseIso);
 
@@ -94,22 +94,22 @@ export async function POST(req: Request) {
         ? addSeconds(nowIso, durationMinutes * 60)
         : null;
 
-    // ✅ CORREÇÃO DO DEADLINE (E.2)
     const startDeadline =
       lifecycleMode === "new"
         ? calculateStartDeadlineBrasil(nowIso, 30)
         : null;
 
+    // ✅ CORREÇÃO: não existe mais "active" — legacy cria "journey_active"
     await supabase
       .from("passes")
       .update({ status: "expired" })
       .eq("user_id", userId)
       .eq("experience_id", experienceId)
-      .eq("status", "active");
+      .eq("status", "journey_active");
 
     await supabase.from("passes").insert({
       user_id: userId,
-      status: lifecycleMode === "legacy" ? "active" : "purchased_not_started",
+      status: lifecycleMode === "legacy" ? "journey_active" : "purchased_not_started",
       duration_minutes: durationMinutes,
       purchased_at: nowIso,
       expires_at: expiresAt,

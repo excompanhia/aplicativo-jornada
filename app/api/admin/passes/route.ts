@@ -26,9 +26,7 @@ export async function GET(req: Request) {
     }
 
     const supabaseAnon = getSupabaseAnon();
-    const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(
-      token
-    );
+    const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(token);
 
     if (userErr || !userData?.user) {
       return NextResponse.json(
@@ -39,28 +37,33 @@ export async function GET(req: Request) {
 
     const email = (userData.user.email || "").toLowerCase();
     if (email !== ADMIN_EMAIL) {
-      return NextResponse.json(
-        { ok: false, error: "forbidden" },
-        { status: 403 }
-      );
+      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
     }
 
-    // 2) Buscar passes com service role (read-only)
+    // 2) Buscar passes com service role (read-only + pequenas normalizações)
     const supabaseAdmin = getSupabaseAdmin();
 
+    // ✅ (opcional, mas útil no Admin): auto-expirar purchased_not_started que passaram do start_deadline
+    // Isso evita que o Admin mostre "comprado aguardando iniciar" quando já venceu.
+    const nowIso = new Date().toISOString();
+    await supabaseAdmin
+      .from("passes")
+      .update({ status: "expired_without_start" })
+      .eq("status", "purchased_not_started")
+      .not("start_deadline", "is", null)
+      .lt("start_deadline", nowIso);
+
+    // ✅ Novo select: inclui campos do lifecycle + experience_id para auditoria/métricas
     const { data: passes, error: passesErr } = await supabaseAdmin
       .from("passes")
       .select(
-        "id,user_id,status,duration_minutes,purchased_at,expires_at,payment_provider,payment_id"
+        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id"
       )
       .order("purchased_at", { ascending: false })
       .limit(200);
 
     if (passesErr) {
-      return NextResponse.json(
-        { ok: false, error: passesErr.message },
-        { status: 500 }
-      );
+      return NextResponse.json({ ok: false, error: passesErr.message }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, passes });

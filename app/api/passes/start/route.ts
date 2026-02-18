@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       .from("passes")
       .select("id,experience_id,expires_at,status")
       .eq("user_id", uid)
-      .eq("status", "active")
+      .eq("status", "journey_active")
       .order("expires_at", { ascending: false })
       .limit(1);
 
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "start_window_expired" }, { status: 410 });
     }
 
-    // 5) iniciar de fato: status active + started_at + expires_at (agora + duration)
+    // 5) iniciar de fato: status journey_active + started_at + expires_at (agora + duration)
     const durationMinutes = Number(row.duration_minutes);
     if (!durationMinutes || durationMinutes <= 0) {
       return NextResponse.json({ ok: false, error: "invalid_duration_minutes" }, { status: 500 });
@@ -115,7 +115,7 @@ export async function POST(req: Request) {
     const { data: updated, error: updErr } = await supabase
       .from("passes")
       .update({
-        status: "active",
+        status: "journey_active",
         started_at: nowIso,
         expires_at: expiresAtIso,
       })
