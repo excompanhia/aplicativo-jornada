@@ -20,8 +20,7 @@ function readExpFromUrl(): string {
       (params.get("exp") ||
         params.get("experience_id") ||
         params.get("experience") ||
-        "")
-        .trim();
+        "").trim();
 
     return exp;
   } catch {
@@ -143,12 +142,11 @@ export default function PaymentPendingPage() {
       // 2) Procura passe desta experiência:
       //    - journey_active (válido) => pode entrar direto
       //    - purchased_not_started => pagamento confirmado, mas ainda não iniciou
-      const nowIso = new Date().toISOString();
       const finalExp = exp || "audiowalk1";
 
       const { data, error: passErr } = await supabase
         .from("passes")
-        .select("id, status, expires_at, experience_id")
+        .select("id, status, expires_at, experience_id, purchased_at")
         .eq("user_id", userId)
         .eq("experience_id", finalExp)
         .in("status", ["journey_active", "purchased_not_started"])
@@ -167,17 +165,20 @@ export default function PaymentPendingPage() {
 
       if (row?.status === "journey_active") {
         // se tiver expires_at e estiver válido, libera
-        if (row.expires_at && row.expires_at > nowIso) {
-          setStatusText("Pagamento confirmado! Liberando acesso…");
-          router.replace(`/journey/${encodeURIComponent(finalExp)}?play=1`);
-          return;
+        if (row.expires_at) {
+          const expMs = new Date(row.expires_at).getTime();
+          if (Number.isFinite(expMs) && expMs > Date.now()) {
+            setStatusText("Pagamento confirmado! Liberando acesso…");
+            router.replace(`/journey/${encodeURIComponent(finalExp)}?play=1`);
+            return;
+          }
         }
       }
 
       if (row?.status === "purchased_not_started") {
-        // pagamento confirmado no modo "new": manda para a tela pré-início
+        // ✅ pagamento confirmado no modo "new": manda para a tela pré-início (dentro da Journey)
         setStatusText("Pagamento confirmado! Preparando o início…");
-        router.replace(`/journey/${encodeURIComponent(finalExp)}/landing`);
+        router.replace(`/journey/${encodeURIComponent(finalExp)}?play=1`);
         return;
       }
 
@@ -221,7 +222,15 @@ export default function PaymentPendingPage() {
   }, []);
 
   return (
-    <main style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, maxWidth: 520 }}>
+    <main
+      style={{
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        maxWidth: 520,
+      }}
+    >
       <h1 style={{ margin: 0 }}>Aguardando confirmação…</h1>
 
       <p style={{ margin: 0, opacity: 0.9 }}>{statusText}</p>
