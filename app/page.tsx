@@ -107,7 +107,7 @@ export default function Home() {
         .from("passes")
         .select("id, status, expires_at")
         .eq("user_id", userId)
-        .eq("status", "active")
+        .eq("status", "journey_active")
         .gt("expires_at", nowIso)
         .order("expires_at", { ascending: false })
         .limit(1);
