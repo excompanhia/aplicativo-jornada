@@ -13,6 +13,7 @@ import {
 import AudioEngine, { EngineTrack } from "../components/AudioEngine";
 import { onPauseAudioNow } from "../lib/appEvents";
 import AccessGuard from "./AccessGuard";
+import { supabase } from "../lib/supabaseClient";
 
 type Direction = "left" | "right" | "none";
 
@@ -273,6 +274,9 @@ export default function JourneyPage() {
   // ✅ FIX: tempo por stationId (fonte de verdade)
   const timeByStationIdRef = useRef<Record<string, number>>({});
 
+  // ✅ NOVO: evita re-marcar múltiplas vezes a última estação
+  const lastStationMarkedRef = useRef(false);
+
   useEffect(() => {
     latestIndexRef.current = index;
   }, [index]);
@@ -308,6 +312,40 @@ export default function JourneyPage() {
     safeSet(KEY_PLAYING, String(!latestPausedRef.current));
     safeSet(KEY_POS_PREFIX + stationId, String(t || 0));
   }
+
+  async function markLastStationReached() {
+    try {
+      const slug = safeLocalGet(KEY_CURRENT_EXPERIENCE);
+      if (!slug || !slug.trim()) return;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+      if (!session?.access_token) return;
+
+      await fetch(
+        `/api/passes/reach-last-station?exp=${encodeURIComponent(slug.trim())}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: "no-store",
+        }
+      );
+    } catch {}
+  }
+
+  // ✅ NOVO: quando entra na última estação, marca no backend
+  useEffect(() => {
+    if (loadState.status !== "ready") return;
+    if (!stations.length) return;
+    if (index !== stations.length - 1) return;
+    if (lastStationMarkedRef.current) return;
+
+    lastStationMarkedRef.current = true;
+    markLastStationReached();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, stations.length, loadState.status]);
 
   // ✅ FIX PRINCIPAL: sempre que a estação mudar, pausar e aplicar seek do tempo salvo daquela estação
   useEffect(() => {

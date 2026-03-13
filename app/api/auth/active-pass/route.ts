@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/app/lib/supabaseAdmin";
 
@@ -55,15 +54,15 @@ export async function GET(req: Request) {
       }
     }
 
-    // ✅ 2) pega passe "ativo" para esta experiência (status oficial)
+    // ✅ 2) pega passe ativo para esta experiência
     const { data: activeData, error: activeErr } = await supabase
       .from("passes")
       .select(
-        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id"
+        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id,last_station_reached"
       )
       .eq("user_id", uid)
       .eq("experience_id", exp)
-      .in("status", ["journey_active"])
+      .eq("status", "journey_active")
       .order("expires_at", { ascending: false })
       .limit(1);
 
@@ -75,6 +74,35 @@ export async function GET(req: Request) {
       Array.isArray(activeData) && activeData.length > 0 ? activeData[0] : null;
 
     if (activePass) {
+      const expMs = activePass.expires_at
+        ? new Date(activePass.expires_at).getTime()
+        : NaN;
+
+      if (Number.isFinite(expMs) && Date.now() > expMs) {
+        const nextStatus = activePass.last_station_reached === true
+          ? "completed"
+          : "ended_by_time";
+
+        const { data: endedPass, error: endErr } = await supabase
+          .from("passes")
+          .update({ status: nextStatus })
+          .eq("id", activePass.id)
+          .select(
+            "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id,last_station_reached"
+          )
+          .maybeSingle();
+
+        if (endErr) {
+          return NextResponse.json({ ok: false, error: endErr.message }, { status: 500 });
+        }
+
+        return NextResponse.json({
+          ok: true,
+          pass: null,
+          ended_pass: endedPass || null,
+        });
+      }
+
       return NextResponse.json({ ok: true, pass: activePass });
     }
 
@@ -82,7 +110,7 @@ export async function GET(req: Request) {
     const { data: pendingData, error: pendingErr } = await supabase
       .from("passes")
       .select(
-        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id"
+        "id,user_id,status,duration_minutes,purchased_at,start_deadline,started_at,expires_at,payment_provider,payment_id,experience_id,last_station_reached"
       )
       .eq("user_id", uid)
       .eq("experience_id", exp)
