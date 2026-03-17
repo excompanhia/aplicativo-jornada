@@ -3,7 +3,6 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
-import { pauseAudioNow } from "../lib/appEvents";
 
 type PassRow = {
   id: string;
@@ -88,35 +87,29 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const [pass, setPass] = useState<PassRow | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0);
 
-  // ✅ mostrar "logado como: ..."
   const [userEmail, setUserEmail] = useState<string>("");
 
   const warnedRef = useRef(false);
   const tickRef = useRef<number | null>(null);
 
-  // ✅ Depois que entrou com passe válido, NÃO reavalia durante a sessão
   const accessGrantedRef = useRef(false);
 
-  // ✅ Fonte da verdade do tempo (vem do Supabase)
   const expiresAtMsRef = useRef<number | null>(null);
 
-  // ✅ Evita falso negativo: só consideramos expiração depois que o expires_at foi carregado
   const hasExpiryRef = useRef(false);
 
   const [showWarning, setShowWarning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ exp atual (slug da rota) para manter o checkout amarrado
   const expRef = useRef<string>("");
 
   function computeRemainingFromExpiry(): number | null {
     const expMs = expiresAtMsRef.current;
-    if (!expMs) return null; // ainda não carregou a fonte da verdade
+    if (!expMs) return null;
     return Math.floor((expMs - Date.now()) / 1000);
   }
 
   function goExpired() {
-    // ✅ Só pode expirar se já carregamos o expires_at (senão é falso negativo)
     if (!hasExpiryRef.current) return;
 
     const exp = expRef.current || getLastExpFallback();
@@ -125,13 +118,11 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   }
 
   function goLoginWithExp() {
-    // ✅ sempre carregar o login amarrado ao slug atual
     const exp =
       expRef.current ||
       getJourneySlugFromPathname() ||
       getLastExpFallback();
 
-    // ✅ “next” dizendo pra onde voltar (rota atual)
     let next = "";
     try {
       if (typeof window !== "undefined") {
@@ -151,10 +142,8 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   async function loadPassOnce() {
     setError(null);
 
-    // ✅ Se já foi liberado uma vez nesta sessão, não revalida
     if (accessGrantedRef.current) return;
 
-    // 1) pega sessão/token
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData.session;
 
@@ -163,12 +152,10 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // guarda email para mostrar no app
     setUserEmail(session.user?.email || "");
 
     const token = session.access_token;
 
-    // ✅ pega a experiência (slug) atual
     const exp =
       expRef.current ||
       getJourneySlugFromPathname() ||
@@ -179,7 +166,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 2) consulta passe no servidor (agora pode devolver ACTIVE ou PURCHASED_NOT_STARTED)
     const res = await fetch(
       `/api/auth/active-pass?exp=${encodeURIComponent(exp)}`,
       {
@@ -203,16 +189,13 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ NOVO: se comprou mas não iniciou, mostramos a TELA PRÉ-AUDIOWALK
     if (row.status === "purchased_not_started") {
-      // Não inicia timer, não define expiresAt.
       setPass(row);
       setRemainingSeconds(0);
       setLoading(false);
       return;
     }
 
-    // ✅ ACTIVE: Fonte da verdade do tempo é expires_at do Supabase
     if (!row.expires_at) {
       setError("Passe inválido: expires_at ausente.");
       return;
@@ -229,7 +212,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ liberado. não revalidamos até sair da Journey.
     accessGrantedRef.current = true;
 
     setPass(row);
@@ -237,7 +219,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     setLoading(false);
   }
 
-  // ✅ timer começa SOMENTE quando já temos expires_at
   function startTimerIfNeeded() {
     if (tickRef.current) return;
     if (!hasExpiryRef.current) return;
@@ -254,19 +235,10 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       }
 
       setRemainingSeconds(next);
-
-      if (!warnedRef.current && next <= 300) {
-        warnedRef.current = true;
-        setShowWarning(true);
-
-        // pausa o áudio imediatamente (o cronômetro continua)
-        pauseAudioNow();
-      }
     }, 1000);
   }
 
   useEffect(() => {
-    // ✅ captura exp da rota e persiste como fallback
     const slug = getJourneySlugFromPathname();
     expRef.current = slug;
     persistLastExp(slug);
@@ -305,7 +277,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("online", onOnline);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function buyPlan(plano: "1h" | "2h" | "day") {
@@ -334,7 +305,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   async function startJourneyNow() {
     setError(null);
 
-    // trava mobile-only aplicada no lugar certo: no INICIAR
     if (!isMobileDevice()) {
       setError("Para iniciar a experiência, use o celular.");
       return;
@@ -370,7 +340,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
     if (!res.ok || !json?.ok) {
       const err = json?.error || "Erro ao iniciar.";
-      // se janela expirou, manda para expired
       if (err === "start_window_expired") {
         hasExpiryRef.current = true;
         goExpired();
@@ -393,7 +362,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // agora virou ACTIVE
     const expiraMs = new Date(row.expires_at).getTime();
     expiresAtMsRef.current = expiraMs;
     hasExpiryRef.current = true;
@@ -417,7 +385,6 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     );
   }
 
-  // ✅ TELA PRÉ-AUDIOWALK
   if (pass?.status === "purchased_not_started") {
     return (
       <main style={{ padding: 16, maxWidth: 560, margin: "0 auto" }}>
