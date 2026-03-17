@@ -93,6 +93,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
   const tickRef = useRef<number | null>(null);
 
   const accessGrantedRef = useRef(false);
+  const recheckingRef = useRef(false);
 
   const expiresAtMsRef = useRef<number | null>(null);
 
@@ -139,84 +140,99 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     router.replace(url);
   }
 
-  async function loadPassOnce() {
-    setError(null);
-
-    if (accessGrantedRef.current) return;
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const session = sessionData.session;
-
-    if (!session) {
-      goLoginWithExp();
-      return;
-    }
-
-    setUserEmail(session.user?.email || "");
-
-    const token = session.access_token;
-
-    const exp =
-      expRef.current ||
-      getJourneySlugFromPathname() ||
-      getLastExpFallback();
-
-    if (!exp) {
-      setError("Não foi possível identificar esta experiência.");
-      return;
-    }
-
-    const res = await fetch(
-      `/api/auth/active-pass?exp=${encodeURIComponent(exp)}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      }
-    );
-
-    const json = await res.json().catch(() => null);
-
-    if (!res.ok || !json?.ok) {
-      setError(json?.error || "Erro ao verificar passe.");
-      return;
-    }
-
-    const row = json?.pass ? (json.pass as PassRow) : null;
-
-    if (!row) {
-      hasExpiryRef.current = true;
-      goExpired();
-      return;
-    }
+  function applyPassState(row: PassRow) {
+    setPass(row);
 
     if (row.status === "purchased_not_started") {
-      setPass(row);
+      accessGrantedRef.current = false;
+      hasExpiryRef.current = false;
+      expiresAtMsRef.current = null;
       setRemainingSeconds(0);
-      setLoading(false);
       return;
     }
 
     if (!row.expires_at) {
-      setError("Passe inválido: expires_at ausente.");
-      return;
+      throw new Error("Passe inválido: expires_at ausente.");
     }
 
     const expiraMs = new Date(row.expires_at).getTime();
     expiresAtMsRef.current = expiraMs;
     hasExpiryRef.current = true;
-
-    const rest = computeRemainingFromExpiry();
-
-    if (rest !== null && rest <= 0) {
-      goExpired();
-      return;
-    }
-
     accessGrantedRef.current = true;
 
-    setPass(row);
+    const rest = computeRemainingFromExpiry();
     setRemainingSeconds(rest ?? 0);
-    setLoading(false);
+  }
+
+  async function loadPassOnce(force = false) {
+    if (recheckingRef.current) return;
+
+    setError(null);
+
+    if (accessGrantedRef.current && !force) return;
+
+    recheckingRef.current = true;
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+
+      if (!session) {
+        goLoginWithExp();
+        return;
+      }
+
+      setUserEmail(session.user?.email || "");
+
+      const token = session.access_token;
+
+      const exp =
+        expRef.current ||
+        getJourneySlugFromPathname() ||
+        getLastExpFallback();
+
+      if (!exp) {
+        setError("Não foi possível identificar esta experiência.");
+        return;
+      }
+
+      const res = await fetch(
+        `/api/auth/active-pass?exp=${encodeURIComponent(exp)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }
+      );
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        setError(json?.error || "Erro ao verificar passe.");
+        return;
+      }
+
+      const row = json?.pass ? (json.pass as PassRow) : null;
+
+      if (!row) {
+        hasExpiryRef.current = true;
+        goExpired();
+        return;
+      }
+
+      applyPassState(row);
+
+      const rest = computeRemainingFromExpiry();
+      if (rest !== null && rest <= 0) {
+        goExpired();
+        return;
+      }
+
+      setLoading(false);
+    } catch {
+      setError("Erro ao verificar passe.");
+    } finally {
+      recheckingRef.current = false;
+    }
   }
 
   function startTimerIfNeeded() {
@@ -238,6 +254,12 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
     }, 1000);
   }
 
+  async function recheckPassAfterReturn() {
+    if (!accessGrantedRef.current) return;
+    await loadPassOnce(true);
+    startTimerIfNeeded();
+  }
+
   useEffect(() => {
     const slug = getJourneySlugFromPathname();
     expRef.current = slug;
@@ -250,30 +272,26 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
 
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
-        const next = computeRemainingFromExpiry();
-        if (next === null) return;
-
-        if (next <= 0) {
-          setRemainingSeconds(0);
-          goExpired();
-        } else {
-          setRemainingSeconds(next);
-        }
+        void recheckPassAfterReturn();
       }
     }
 
     function onOnline() {
-      const next = computeRemainingFromExpiry();
-      if (next === null) return;
-      if (next > 0) setRemainingSeconds(next);
+      void recheckPassAfterReturn();
     }
 
+    function onFocus() {
+      void recheckPassAfterReturn();
+    }
+
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("online", onOnline);
 
     return () => {
       if (tickRef.current) window.clearInterval(tickRef.current);
       tickRef.current = null;
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("online", onOnline);
     };
@@ -362,15 +380,7 @@ export default function AccessGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    const expiraMs = new Date(row.expires_at).getTime();
-    expiresAtMsRef.current = expiraMs;
-    hasExpiryRef.current = true;
-
-    const rest = computeRemainingFromExpiry();
-
-    accessGrantedRef.current = true;
-    setPass(row);
-    setRemainingSeconds(rest ?? 0);
+    applyPassState(row);
     setLoading(false);
 
     startTimerIfNeeded();
