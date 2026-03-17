@@ -1,10 +1,13 @@
-import { Station } from "./stations";
+type StationLike = {
+  audioSrc?: string;
+  images?: string[];
+};
 
 /**
  * Extrai todas as URLs (áudios + imagens) das estações
  * Remove duplicadas
  */
-export function collectStationAssets(stations: Station[]): string[] {
+export function collectStationAssets(stations: StationLike[]): string[] {
   const urls = new Set<string>();
 
   for (const station of stations) {
